@@ -318,7 +318,7 @@ namespace NutStaller
             if (_busy) return;
             _busy = true;
             try { await work(); }
-            catch (Exception ex) { SetStatus("ERROR: " + ex.Message); }
+            catch (Exception ex) { ReportFailure(ex); }
             finally
             {
                 _busy = false;
@@ -329,6 +329,28 @@ namespace NutStaller
         }
 
         private void SetStatus(string text) => setupStatus.SetText(text.ToUpperInvariant());
+
+        private static string LogPath => Path.Combine(AppContext.BaseDirectory, "nutstaller.log");
+
+        // The status line is one short strip and long paths get ellipsized out of it,
+        // so failures also go to a dialog (selectable, Ctrl+C copies it) and a log file
+        // next to the exe. Without this an error naming a folder is unreadable.
+        private void ReportFailure(Exception ex)
+        {
+            string firstLine = ex.Message.Split('\n')[0].Trim();
+            SetStatus("ERROR: " + firstLine + " (SEE NUTSTALLER.LOG)");
+
+            try
+            {
+                File.AppendAllText(LogPath,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}{Environment.NewLine}{Environment.NewLine}");
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+
+            MessageBox.Show(this, ex.Message, "NutStaller - something went wrong",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
 
         private async Task DoDownloadRenut()
         {
@@ -406,6 +428,27 @@ namespace NutStaller
             }
             Directory.CreateDirectory(_state.GameDataDir);
 
+            // extract-xiso has no overwrite switch (see its -h): it aborts with
+            // "read error: File exists" the moment it meets a file from an earlier
+            // run, so a half-finished extraction would make every retry fail until
+            // the folder is cleared by hand. Do it for them.
+            if (HasExtractedData(_state.GameDataDir, iso))
+            {
+                var answer = MessageBox.Show(this,
+                    $"{_state.GameDataDir}{Environment.NewLine}{Environment.NewLine}" +
+                    "already holds game data, and extract-xiso cannot write over it." +
+                    $"{Environment.NewLine}{Environment.NewLine}Replace it and extract again?",
+                    "Replace existing game data?", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (answer != DialogResult.Yes)
+                {
+                    SetStatus("Extraction cancelled - existing game data was kept.");
+                    return;
+                }
+
+                SetStatus("Clearing the previous extraction...");
+                await Task.Run(() => ClearExtractTarget(_state.GameDataDir, iso));
+            }
+
             SetStatus("Extracting ISO...");
             long isoSize = Math.Max(1, new FileInfo(iso).Length);
             var psi = new ProcessStartInfo
@@ -423,19 +466,47 @@ namespace NutStaller
             var stderrTask = proc.StandardError.ReadToEndAsync();
 
             // extract-xiso prints no percentage, so track bytes landing on disk
-            // against the iso size instead
+            // against the iso size instead. The scan runs off the UI thread and
+            // backs off proportionally to how long it takes, so a slow disk is
+            // not spending most of its seeks answering us instead of extracting.
+            long scanMs = 0;
             while (!proc.HasExited)
             {
-                await Task.Delay(400);
-                long done = DirectorySize(_state.GameDataDir);
+                await Task.Delay((int)Math.Clamp(scanMs * 4, 500, 5000));
+                if (proc.HasExited) break;
+
+                long t0 = Stopwatch.GetTimestamp();
+                long done = await Task.Run(() => DirectorySize(_state.GameDataDir));
+                scanMs = (Stopwatch.GetTimestamp() - t0) * 1000 / Stopwatch.Frequency;
+
                 progressBar.Value = Math.Min(0.99, (double)done / isoSize);
                 SetStatus($"Extracting ISO... {done / (1024 * 1024)} / {isoSize / (1024 * 1024)} MB");
             }
             await proc.WaitForExitAsync();
-            string stderr = await stderrTask;
-            await stdoutTask;
+            string stderr = (await stderrTask).Trim();
+            string stdout = (await stdoutTask).Trim();
             if (proc.ExitCode != 0)
-                throw new InvalidOperationException($"extract-xiso failed ({proc.ExitCode}): {stderr.Trim()}");
+            {
+                // extract-xiso reports some failures on stdout, so fall back to it
+                string detail = stderr.Length > 0 ? stderr : LastLines(stdout, 6);
+
+                // extract-xiso says "read error: File exists" for anything it cannot
+                // parse, which is the same thing it says about a genuine leftover
+                // file, so spell out the likelier cause rather than leaving the user
+                // with a message that points at the wrong problem.
+                string hint = LooksLikeXboxIso(iso) ? "" :
+                    Environment.NewLine + Environment.NewLine +
+                    "This file does not look like a complete Xbox disc image. If it is " +
+                    "still being copied, or the copy was interrupted partway, let it " +
+                    "finish and try again.";
+
+                throw new InvalidOperationException(
+                    $"extract-xiso failed (exit code {proc.ExitCode})." +
+                    $"{Environment.NewLine}{Environment.NewLine}{detail}{hint}" +
+                    $"{Environment.NewLine}{Environment.NewLine}ISO: {iso}" +
+                    $"{Environment.NewLine}Size: {new FileInfo(iso).Length / (1024 * 1024)} MB" +
+                    $"{Environment.NewLine}Target folder: {_state.GameDataDir}");
+            }
             progressBar.Value = 1;
 
             _state.WriteRenutCfg();
@@ -443,20 +514,106 @@ namespace NutStaller
             SetStatus("Game data extracted and paths written. You are good to go!");
         }
 
-        // total bytes currently on disk under dir; tolerant of files still being written
+        // Every disc layout puts the volume descriptor one sector into its data
+        // partition, so the magic lands at the partition base plus 0x10000.
+        // (the partition bases are the ones extract-xiso itself probes)
+        private static readonly long[] XisoMagicOffsets =
+        {
+            0x00000000 + 0x10000, // plain xiso, no video partition
+            0x02080000 + 0x10000, // XGD3
+            0x0FD90000 + 0x10000, // XGD2, which Nuts & Bolts is
+            0x18300000 + 0x10000, // XGD1
+            0x4A980000 + 0x10000, // XGD3, redump style
+        };
+
+        // Advisory only: a false negative must never block an extraction, it just
+        // adds a hint to an error extract-xiso already raised.
+        private static bool LooksLikeXboxIso(string path)
+        {
+            const string magic = "MICROSOFT*XBOX*MEDIA";
+            try
+            {
+                using var fs = File.OpenRead(path);
+                var buf = new byte[magic.Length];
+                foreach (long offset in XisoMagicOffsets)
+                {
+                    if (offset + buf.Length > fs.Length) continue;
+                    fs.Position = offset;
+                    if (fs.ReadAtLeast(buf, buf.Length, throwOnEndOfStream: false) != buf.Length) continue;
+                    if (System.Text.Encoding.ASCII.GetString(buf) == magic) return true;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return false;
+        }
+
+        // Anything in the extract target other than the source iso itself, which the
+        // user may well have dropped into this very folder.
+        private static bool HasExtractedData(string dir, string isoPath) =>
+            Directory.Exists(dir) &&
+            Directory.EnumerateFileSystemEntries(dir).Any(e => !SamePath(e, isoPath));
+
+        private static bool SamePath(string a, string b)
+        {
+            try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }
+            catch (ArgumentException) { return false; }
+        }
+
+        // Empties the extract target, carefully stepping around the source iso so a
+        // re-extract never deletes the user's own disc image.
+        private static void ClearExtractTarget(string dir, string isoPath)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(dir).ToList())
+            {
+                if (SamePath(entry, isoPath)) continue;
+                try
+                {
+                    if (Directory.Exists(entry)) Directory.Delete(entry, recursive: true);
+                    else File.Delete(entry);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        // Total bytes currently on disk under dir. Enumerated through DirectoryInfo
+        // so each size comes from the directory entry itself rather than a separate
+        // stat call per file, and with IgnoreInaccessible so folders that appear or
+        // vanish underneath us (extract-xiso is writing into this tree) do not abort
+        // the whole walk and make progress lurch backwards.
         private static long DirectorySize(string dir)
         {
+            var options = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.ReparsePoint,
+            };
+
             long total = 0;
             try
             {
-                foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                foreach (var f in new DirectoryInfo(dir).EnumerateFiles("*", options))
                 {
-                    try { total += new FileInfo(f).Length; }
+                    try { total += f.Length; }
                     catch (IOException) { }
                 }
             }
-            catch (Exception) { }
+            catch (DirectoryNotFoundException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (IOException) { }
             return total;
+        }
+
+        // last n non-empty lines, for surfacing the tail of a tool's output
+        private static string LastLines(string text, int n)
+        {
+            var lines = text.Split('\n')
+                .Select(l => l.TrimEnd('\r'))
+                .Where(l => l.Trim().Length > 0)
+                .ToArray();
+            return string.Join(Environment.NewLine, lines.Skip(Math.Max(0, lines.Length - n)));
         }
 
         // looks for a .iso sitting in the install folder or the game data folder;
