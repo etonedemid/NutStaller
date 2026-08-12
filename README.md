@@ -3,7 +3,7 @@
 A launcher and installer for [reNut](https://github.com/masterspike52/reNut), the PC recompilation of
 Banjo-Kazooie: Nuts & Bolts.
 
-![NutStaller](NutStaller/Assets/source.png)
+![NutStaller](NutStaller/Assets/bg.png)
 
 ## What it does
 
