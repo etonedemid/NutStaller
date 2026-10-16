@@ -5,6 +5,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- no libicu needed at runtime; one less thing that differs between distros -->
+    <InvariantGlobalization>true</InvariantGlobalization>
     <AssemblyTitle>NutStaller</AssemblyTitle>
     <Product>NutStaller - reNut Launcher</Product>
   </PropertyGroup>

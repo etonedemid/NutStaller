@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=NutStaller
+Comment=Installer and launcher for reNut (Banjo-Kazooie: Nuts & Bolts)
+Exec=NutStaller
+Icon=nutstaller
+Categories=Game;
+Terminal=false

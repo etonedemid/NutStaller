@@ -290,7 +290,7 @@ namespace NutStaller
         private async Task BrowseButton_Click()
         {
             var start = await StorageProvider.TryGetFolderFromPathAsync(
-                Directory.Exists(_state.InstallDir) ? _state.InstallDir : AppContext.BaseDirectory);
+                Directory.Exists(_state.InstallDir) ? _state.InstallDir : LauncherState.HomeDir);
             var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
                 Title = "Where should reNut live?",
@@ -335,7 +335,7 @@ namespace NutStaller
 
         private void SetStatus(string text) => setupStatus.SetText(text.ToUpperInvariant());
 
-        private static string LogPath => Path.Combine(AppContext.BaseDirectory, "nutstaller.log");
+        private static string LogPath => Path.Combine(LauncherState.HomeDir, "nutstaller.log");
 
         // The status line is one short strip and long paths get ellipsized out of it,
         // so failures also go to a dialog (selectable, Ctrl+C copies it) and a log file
@@ -670,14 +670,46 @@ namespace NutStaller
             {
                 // started directly, not through the shell: on Linux UseShellExecute
                 // would hand the AppImage to xdg-open instead of running it
-                Process.Start(new ProcessStartInfo
+                var proc = Process.Start(new ProcessStartInfo
                 {
                     FileName = _state.RenutExe,
                     WorkingDirectory = _state.InstallDir,
                     UseShellExecute = false,
-                });
+                })!;
+                _ = WatchForEarlyExit(proc);
             }
             catch (Exception ex) { ReportFailure(ex); }
+        }
+
+        // A game that dies within seconds never showed a window, so the user sees
+        // nothing at all. Its output is not redirected (the pipes would break, and
+        // take the game down, once the launcher closes), so point at a terminal.
+        // On Linux the usual cause is a glibc older than the reNut build wants.
+        private async Task WatchForEarlyExit(Process proc)
+        {
+            using (proc)
+            {
+                await Task.WhenAny(proc.WaitForExitAsync(), Task.Delay(TimeSpan.FromSeconds(10)));
+                if (!proc.HasExited || proc.ExitCode == 0) return;
+
+                string glibc = OperatingSystem.IsLinux() && GlibcVersion() is { } v
+                    ? $"{Environment.NewLine}{Environment.NewLine}This system has glibc {v}. If running it " +
+                      "from a terminal shows \"GLIBC_x.yy not found\", this reNut build needs a newer " +
+                      "Linux distribution."
+                    : "";
+                ReportFailure(new InvalidOperationException(
+                    $"reNut quit right after starting (exit code {proc.ExitCode}). Run it from a terminal " +
+                    $"to see why:{Environment.NewLine}{Environment.NewLine}{_state.RenutExe}{glibc}"));
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "gnu_get_libc_version")]
+        private static extern IntPtr GnuGetLibcVersion();
+
+        private static string? GlibcVersion()
+        {
+            try { return System.Runtime.InteropServices.Marshal.PtrToStringAnsi(GnuGetLibcVersion()); }
+            catch (Exception) { return null; } // musl and friends have no such call
         }
 
         // ------------------------------------------------------------- keybinds

@@ -17,9 +17,12 @@ namespace NutStaller.Core
         public string RenutToml => Path.Combine(ConfigDir, "renut.toml");
         public string RenutCfg => Path.Combine(ConfigDir, "renut.cfg");
         public string GameDataDir => Path.Combine(InstallDir, "game");
-        // Documents on Windows, $XDG_DATA_HOME (~/.local/share) elsewhere
+        // Documents on Windows, $XDG_DATA_HOME (~/.local/share) elsewhere. DoNotVerify:
+        // by default .NET answers "" for a folder that does not exist yet (a fresh
+        // home has no ~/.local/share), which would put renut/ in the working dir
         public string UserDataDir => Path.Combine(Environment.GetFolderPath(OperatingSystem.IsWindows()
-            ? Environment.SpecialFolder.MyDocuments : Environment.SpecialFolder.LocalApplicationData), "renut");
+            ? Environment.SpecialFolder.MyDocuments : Environment.SpecialFolder.LocalApplicationData,
+            Environment.SpecialFolderOption.DoNotVerify), "renut");
         public string ToolsDir => Path.Combine(InstallDir, "tools");
         public string XisoExe => Path.Combine(ToolsDir, OperatingSystem.IsWindows() ? "extract-xiso.exe" : "extract-xiso");
 
@@ -28,13 +31,19 @@ namespace NutStaller.Core
         public bool GameExtracted => Directory.Exists(GameDataDir) &&
                                      Directory.EnumerateFileSystemEntries(GameDataDir).Any();
 
-        private static string IniPath => Path.Combine(AppContext.BaseDirectory, "nutstaller.ini");
+        // Where the launcher keeps its own files: beside the exe, or beside the
+        // .AppImage when run as one (its mount is read-only)
+        public static string HomeDir =>
+            Path.GetDirectoryName(Environment.GetEnvironmentVariable("APPIMAGE") ?? "") is { Length: > 0 } dir
+                ? dir : AppContext.BaseDirectory;
+
+        private static string IniPath => Path.Combine(HomeDir, "nutstaller.ini");
 
         private LauncherState(string installDir) => InstallDir = installDir;
 
         public static LauncherState Load()
         {
-            var state = new LauncherState(Path.Combine(AppContext.BaseDirectory, "reNut"));
+            var state = new LauncherState(Path.Combine(HomeDir, "reNut"));
             if (File.Exists(IniPath))
             {
                 foreach (var line in File.ReadAllLines(IniPath))
