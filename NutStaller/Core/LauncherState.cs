@@ -9,14 +9,19 @@ namespace NutStaller.Core
         public string RenutVersion { get; set; } = "";
         public string XisoVersion { get; set; } = "";
 
-        public string RenutExe => Path.Combine(InstallDir, "renut.exe");
-        public string RenutToml => Path.Combine(InstallDir, "renut.toml");
-        public string RenutCfg => Path.Combine(InstallDir, "renut.cfg");
+        // Windows gets a zip with renut.exe, Linux a single AppImage
+        public string RenutExe => Path.Combine(InstallDir, OperatingSystem.IsWindows() ? "renut.exe" : "renut.AppImage");
+        // renut.exe reads these next to itself; the Linux build reads them from
+        // its user data dir (checked with strace, it never looks beside the AppImage)
+        private string ConfigDir => OperatingSystem.IsWindows() ? InstallDir : UserDataDir;
+        public string RenutToml => Path.Combine(ConfigDir, "renut.toml");
+        public string RenutCfg => Path.Combine(ConfigDir, "renut.cfg");
         public string GameDataDir => Path.Combine(InstallDir, "game");
-        public string UserDataDir => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "renut");
+        // Documents on Windows, $XDG_DATA_HOME (~/.local/share) elsewhere
+        public string UserDataDir => Path.Combine(Environment.GetFolderPath(OperatingSystem.IsWindows()
+            ? Environment.SpecialFolder.MyDocuments : Environment.SpecialFolder.LocalApplicationData), "renut");
         public string ToolsDir => Path.Combine(InstallDir, "tools");
-        public string XisoExe => Path.Combine(ToolsDir, "extract-xiso.exe");
+        public string XisoExe => Path.Combine(ToolsDir, OperatingSystem.IsWindows() ? "extract-xiso.exe" : "extract-xiso");
 
         public bool RenutInstalled => File.Exists(RenutExe);
         public bool XisoInstalled => File.Exists(XisoExe);

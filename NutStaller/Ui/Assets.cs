@@ -1,79 +1,56 @@
-using System.Drawing.Text;
-using System.Reflection;
-using System.Runtime.InteropServices;
+using System.Globalization;
+using Avalonia;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace NutStaller.Ui
 {
-    // Embedded resources (blueprint art + the Andy font) and the shared palette.
-    // Loads lazily so controls also work inside the VS designer.
+    // Embedded resources (blueprint art + the Andy font), the shared palette and
+    // the text drawing every Bk control goes through.
     internal static class Assets
     {
         // Blueprint palette, sampled from the menu art.
-        public static readonly Color Blueprint = Color.FromArgb(45, 82, 168);
-        public static readonly Color Ink = Color.White;
-        public static readonly Color InkDim = Color.FromArgb(200, 255, 255, 255);
-        public static readonly Color LineDim = Color.FromArgb(110, 255, 255, 255);
+        public static readonly Color Blueprint = Color.FromRgb(45, 82, 168);
+        public static readonly IBrush Ink = Brushes.White;
+        public static readonly IBrush InkDim = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255));
+        public static readonly IBrush Shadow = new SolidColorBrush(Color.FromArgb(120, 0, 0, 40));
+        public static readonly IBrush Navy = new SolidColorBrush(Color.FromRgb(10, 20, 60));
+        public static readonly IPen LineDim = new Pen(new SolidColorBrush(Color.FromArgb(110, 255, 255, 255)));
+
+        public static readonly FontFamily AndyFamily = new("avares://NutStaller/Assets#Andy");
+        private static readonly Typeface Andy = new(AndyFamily);
 
         private static Bitmap? _background;
-        private static Bitmap? _toggleBox;
-        private static PrivateFontCollection? _fonts;
-        private static IntPtr _fontMem = IntPtr.Zero;
-        private static readonly Dictionary<int, Font> _fontCache = new();
+        public static Bitmap Background =>
+            _background ??= new Bitmap(AssetLoader.Open(new Uri("avares://NutStaller/Assets/bg.png")));
 
-        public static Bitmap? Background => _background ??= TryLoadBitmap("bg.png");
-        public static Bitmap? ToggleBox => _toggleBox ??= TryLoadBitmap("toggle.png");
-
-        public static Font Andy(float sizePx, FontStyle style = FontStyle.Bold)
+        // Andy text with the soft drop shadow, vertically centred in rc.
+        // Single line with an ellipsis unless wrap is set.
+        public static void DrawText(DrawingContext g, string text, double sizePx, IBrush ink, Rect rc,
+            TextAlignment align = TextAlignment.Left, bool wrap = false,
+            TextTrimming? trimming = null, bool shadow = true)
         {
-            int key = (int)Math.Round(sizePx * 4);
-            if (_fontCache.TryGetValue(key, out var cached)) return cached;
+            if (string.IsNullOrEmpty(text) || rc.Width <= 0 || rc.Height <= 0) return;
 
-            Font f;
-            try
+            FormattedText Make(IBrush brush)
             {
-                _fonts ??= LoadFontCollection();
-                f = new Font(_fonts.Families[0], sizePx, style, GraphicsUnit.Pixel);
+                var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                    Andy, sizePx, brush)
+                {
+                    MaxTextWidth = rc.Width,
+                    Trimming = trimming ?? TextTrimming.CharacterEllipsis,
+                    TextAlignment = align,
+                };
+                if (wrap) ft.MaxTextHeight = rc.Height;
+                else ft.MaxLineCount = 1;
+                return ft;
             }
-            catch
-            {
-                // design-time / missing-resource fallback
-                f = new Font("Segoe UI", Math.Max(sizePx, 6), style, GraphicsUnit.Pixel);
-            }
-            _fontCache[key] = f;
-            return f;
-        }
 
-        private static Stream? TryOpenResource(string name)
-        {
-            var asm = Assembly.GetExecutingAssembly();
-            string? full = Array.Find(asm.GetManifestResourceNames(),
-                n => n.EndsWith(name, StringComparison.OrdinalIgnoreCase));
-            return full == null ? null : asm.GetManifestResourceStream(full);
-        }
-
-        private static Bitmap? TryLoadBitmap(string name)
-        {
-            try
-            {
-                using var s = TryOpenResource(name);
-                return s == null ? null : new Bitmap(s);
-            }
-            catch { return null; }
-        }
-
-        private static PrivateFontCollection LoadFontCollection()
-        {
-            using var s = TryOpenResource("ANDYB.TTF")
-                ?? throw new InvalidOperationException("ANDYB.TTF resource missing");
-            using var ms = new MemoryStream();
-            s.CopyTo(ms);
-            byte[] data = ms.ToArray();
-
-            var fonts = new PrivateFontCollection();
-            _fontMem = Marshal.AllocCoTaskMem(data.Length);
-            Marshal.Copy(data, 0, _fontMem, data.Length);
-            fonts.AddMemoryFont(_fontMem, data.Length);
-            return fonts;
+            var main = Make(ink);
+            double y = rc.Y + (rc.Height - main.Height) / 2;
+            if (shadow) g.DrawText(Make(Shadow), new Point(rc.X + 2, y + 2));
+            g.DrawText(main, new Point(rc.X, y));
         }
     }
 }

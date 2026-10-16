@@ -12,11 +12,12 @@ Banjo-Kazooie: Nuts & Bolts.
 - Writes `renut.cfg` so the in-game path wizard never shows up
 - Edits keybinds in `renut.toml`
 - Checks for reNut updates
-- Works with mouse or an XInput gamepad (dpad moves, A selects, LB/RB switch page, Start plays)
+- Works with mouse or a gamepad (dpad moves, A selects, LB/RB switch page, Start plays)
+- Runs on Windows and Linux (on Linux it installs the reNut AppImage; gamepad support uses SDL2 if installed)
 
 ## Usage
 
-1. Run `NutStaller.exe`
+1. Run `NutStaller.exe` (Windows) or `NutStaller` (Linux)
 2. Pick an install folder
 3. Hit "Do everything" and select your ISO when asked
 4. Hit "Play"
@@ -27,9 +28,11 @@ Drop an ISO into the install folder beforehand and step 3 picks it up automatica
 
 ```
 dotnet publish -p:PublishProfile=win-x64
+dotnet publish -p:PublishProfile=linux-x64
 ```
 
-Produces a single self-contained `bin\publish\NutStaller.exe`. Requires the .NET 8 SDK.
+Each produces a single self-contained executable under `bin/publish/<rid>/`. Requires the .NET 8 SDK
+or newer. The UI is Avalonia, so either build can be made from any OS.
 
 ## Credits
 

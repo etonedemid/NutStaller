@@ -1,11 +1,15 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Media;
+using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using NutStaller.Core;
 using NutStaller.Ui;
 
 namespace NutStaller
 {
-    public partial class NutStallerMainWindow : Form
+    public class NutStallerMainWindow : Window
     {
         private const int DesignW = 1200;
         private const int DesignH = 675;
@@ -15,24 +19,49 @@ namespace NutStaller
 
         private readonly Dictionary<string, BkKeyField> _binds = new();
 
-        // design-time bounds of every control, used to rescale the layout
-        private readonly Dictionary<Control, Rectangle> _baseBounds = new();
-
         private GamepadNavigator? _gamepad;
+
+        // everything is laid out on a 1200x675 canvas over the art; the Viewbox
+        // scales it to the window and letterboxes in blueprint blue
+        private readonly Canvas _root = new() { Width = DesignW, Height = DesignH };
+
+        private readonly BkButton navSetup = new() { Text = "Set Up Game", Selected = true };
+        private readonly BkButton navUpdate = new() { Text = "Check Updates" };
+        private readonly BkButton navKeybinds = new() { Text = "Keybinds" };
+        private readonly BkButton navCredits = new() { Text = "Credits" };
+        private readonly BkButton navPlay = new() { Text = "Play", FontSizePx = 24 };
+
+        private readonly BkPagePanel pageSetup = new();
+        private readonly BkValueBox installBox = new() { Transparent = true };
+        private readonly BkLabel renutStatus = new() { Dim = true, FontSizePx = 17 };
+        private readonly BkLabel xisoStatus = new() { Dim = true, FontSizePx = 17 };
+        private readonly BkLabel gameStatus = new() { Dim = true, FontSizePx = 17 };
+        private readonly BkProgress progressBar = new();
+        private readonly BkLabel setupStatus = new() { Dim = true, FontSizePx = 17 };
+
+        private readonly BkPagePanel pageKeybinds = new() { IsVisible = false };
+        private readonly BkKeyField bindLogField = new() { KeyName = "F2" };
+        private readonly BkLabel keybindsStatus = new() { Dim = true, FontSizePx = 16 };
+
+        private readonly BkPagePanel pageCredits = new() { IsVisible = false };
 
         public NutStallerMainWindow()
         {
-            InitializeComponent();
-            DoubleBuffered = true;
-            SetStyle(ControlStyles.ResizeRedraw, true);
+            Title = "NutStaller";
+            Width = DesignW;
+            Height = DesignH;
+            MinWidth = 800;
+            MinHeight = 450;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            Background = new SolidColorBrush(Assets.Blueprint);
+            BuildLayout();
+            Content = new Viewbox { Stretch = Stretch.Uniform, Child = _root };
 
             _state = LauncherState.Load();
             installBox.Value = _state.InstallDir;
 
             _binds["bind_renut_log_overlay"] = bindLogField;
 
-            CaptureBaseBounds(this);
-            ApplyScale();
             RefreshSetupStatus();
 
             _gamepad = new GamepadNavigator(this,
@@ -41,18 +70,109 @@ namespace NutStaller
                 cyclePage: CyclePage,
                 start: () => navPlay.PerformClick(),
                 back: () => CurrentNav().Focus());
-            FormClosed += (s, e) => _gamepad?.Dispose();
+            Closed += (s, e) => _gamepad?.Dispose();
 
             _ = CheckForUpdatesAsync();
+        }
+
+        private static T Place<T>(Panel parent, T c, double x, double y, double w, double h) where T : Control
+        {
+            Canvas.SetLeft(c, x);
+            Canvas.SetTop(c, y);
+            c.Width = w;
+            c.Height = h;
+            parent.Children.Add(c);
+            return c;
+        }
+
+        private static BkButton Button(Panel parent, string text, double x, double y, double w, double h,
+            Action onClick, double fontSize = 22)
+        {
+            var b = Place(parent, new BkButton { Text = text, FontSizePx = fontSize }, x, y, w, h);
+            b.Click += (s, e) => onClick();
+            return b;
+        }
+
+        private static void Label(Panel parent, string text, double x, double y, double w, double h,
+            double fontSize = 18, bool dim = false) =>
+            Place(parent, new BkLabel { Text = text, FontSizePx = fontSize, Dim = dim }, x, y, w, h);
+
+        private void BuildLayout()
+        {
+            _root.Children.Add(new Image { Source = Assets.Background, Width = DesignW, Height = DesignH });
+
+            Place(_root, navSetup, 402, 335, 185, 32).Click += (s, e) => NavSetup_Click();
+            Place(_root, navUpdate, 402, 371, 185, 32).Click += async (s, e) => await NavUpdate_Click();
+            Place(_root, navKeybinds, 402, 409, 185, 32).Click += (s, e) => NavKeybinds_Click();
+            Place(_root, navCredits, 402, 445, 185, 32).Click += (s, e) => ShowPage(pageCredits, navCredits);
+            Place(_root, navPlay, 402, 496, 185, 36).Click += (s, e) => LaunchGame();
+
+            var p = Place(_root, pageSetup, 634, 281, 551, 323);
+            Label(p, "SET UP RENUT", 18, 16, 300, 30, 26);
+            Button(p, "1. Get latest reNut", 19, 58, 240, 32, () => _ = RunBusy(DoDownloadRenut), 20);
+            Button(p, "2. Get extract-xiso", 19, 98, 240, 32, () => _ = RunBusy(DoDownloadXiso), 20);
+            Button(p, "3. Pick ISO + extract", 19, 138, 240, 32, () => _ = RunBusy(DoPickIsoAndExtract), 20);
+            Button(p, "Do everything", 19, 178, 240, 34, () => _ = RunBusy(async () =>
+            {
+                await DoDownloadRenut();
+                await DoDownloadXiso();
+                await DoPickIsoAndExtract();
+            }));
+            Place(p, renutStatus, 268, 58, 284, 32);
+            Place(p, xisoStatus, 268, 98, 284, 32);
+            Place(p, gameStatus, 268, 138, 284, 32);
+            Label(p, "INSTALL FOLDER", 19, 230, 150, 30, dim: true);
+            Place(p, installBox, 175, 228, 299, 30);
+            Button(p, "...", 499, 230, 40, 30, () => _ = BrowseButton_Click(), 20);
+            Place(p, progressBar, 19, 267, 523, 14);
+            Place(p, setupStatus, 16, 284, 536, 36);
+
+            p = Place(_root, pageKeybinds, 634, 279, 545, 382);
+            Label(p, "KEYBINDS", 16, 14, 300, 30, 26);
+            Label(p, "LOG OVERLAY", 16, 58, 220, 30, dim: true);
+            Place(p, bindLogField, 246, 58, 140, 30);
+            Label(p, "F4 OPENS THE IN-GAME CVAR MENU", 16, 106, 400, 24, 15, true);
+            Label(p, "MORE BINDS SHOW UP HERE ONCE THE GAME WRITES THEM", 16, 132, 520, 24, 15, true);
+            Button(p, "Save", 16, 336, 110, 32, SaveKeybindsButton_Click, 20);
+            Place(p, keybindsStatus, 136, 336, 320, 32);
+
+            p = Place(_root, pageCredits, 634, 281, 548, 382);
+            Label(p, "CREDITS", 16, 14, 300, 30, 26);
+            Label(p, "RENUT BY MASTERSPIKE52 AND CONTRIBUTORS", 16, 56, 516, 26);
+            string[] lines =
+            {
+                "REXGLUE TEAM - REXGLUE SDK",
+                "SOLARCOOKIES - MIDASM HOOKS AND CRT FUNCTIONS",
+                "VALCOMDRIFTY - RENUT LOGO",
+                "OLIEGAMERTV - NUTS AND BOLTS DOCUMENTATION",
+                "EXTRACT-XISO BY THE XBOXDEV TEAM",
+                "THIS - ETONEDEMID",
+            };
+            for (int i = 0; i < lines.Length; i++)
+                Label(p, lines[i], 16, 88 + i * 26, 516, 24, 16, true);
+            Button(p, "reNut on GitHub", 16, 268, 240, 32, () => OpenUrl("https://github.com/masterspike52/reNut"), 20);
+            Button(p, "Join the Discord", 268, 268, 240, 32, () => OpenUrl("https://discord.gg/D5Bz2ZsHdY"), 20);
+            Label(p, "GAMEPAD: DPAD MOVE - A SELECT - LB/RB SWITCH PAGE - START PLAY", 16, 330, 516, 24, 14, true);
         }
 
         // ------------------------------------------------------------- updates
 
         private string? _latestTag;
 
+        // Windows: asset names change between releases (renut-win-x64.zip,
+        // renut.zip), so any zip will do; one that says "win" wins over one
+        // that doesn't. Elsewhere: the AppImage (renut.AppImage, reNut-x86_64.AppImage).
         private static int RenutAssetRank(string n) =>
-            n.Contains("win", StringComparison.OrdinalIgnoreCase) &&
-            n.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? 1 : -1;
+            !OperatingSystem.IsWindows() ? (n.EndsWith(".AppImage", StringComparison.OrdinalIgnoreCase) ? 0 : -1)
+            : !n.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? -1
+            : n.Contains("win", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+
+        private static void MakeExecutable(string path)
+        {
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(path, File.GetUnixFileMode(path) |
+                    UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+        }
 
         private async Task CheckForUpdatesAsync()
         {
@@ -75,7 +195,7 @@ namespace NutStaller
             else navUpdate.Text = "Up To Date";
         }
 
-        private async void NavUpdate_Click(object? sender, EventArgs e)
+        private async Task NavUpdate_Click()
         {
             // progress and status live on the setup page, so show it
             ShowPage(pageSetup, navSetup);
@@ -101,8 +221,8 @@ namespace NutStaller
             foreach (var nav in new Control[] { navSetup, navUpdate, navKeybinds, navCredits, navPlay })
                 yield return nav;
             var page = CurrentPage();
-            foreach (Control c in page.Controls)
-                if (c is BkButton or BkToggle or BkValueBox or BkKeyField)
+            foreach (var c in page.Children)
+                if (c is BkButton or BkValueBox or BkKeyField)
                     yield return c;
         }
 
@@ -111,7 +231,6 @@ namespace NutStaller
             switch (c)
             {
                 case BkButton b: b.PerformClick(); break;
-                case BkToggle t: t.Checked = !t.Checked; break;
                 case BkValueBox v: v.BeginEdit(); break;
                 case BkKeyField k: k.BeginListen(); break;
             }
@@ -119,15 +238,15 @@ namespace NutStaller
 
         private BkPagePanel CurrentPage()
         {
-            if (pageKeybinds.Visible) return pageKeybinds;
-            if (pageCredits.Visible) return pageCredits;
+            if (pageKeybinds.IsVisible) return pageKeybinds;
+            if (pageCredits.IsVisible) return pageCredits;
             return pageSetup;
         }
 
         private BkButton CurrentNav()
         {
-            if (pageKeybinds.Visible) return navKeybinds;
-            if (pageCredits.Visible) return navCredits;
+            if (pageKeybinds.IsVisible) return navKeybinds;
+            if (pageCredits.IsVisible) return navCredits;
             return navSetup;
         }
 
@@ -140,167 +259,51 @@ namespace NutStaller
             next.Focus();
         }
 
-        // ------------------------------------------------------------- scaling
-
-        private void CaptureBaseBounds(Control parent)
-        {
-            foreach (Control c in parent.Controls)
-            {
-                _baseBounds[c] = c.Bounds;
-                if (c is BkPagePanel) CaptureBaseBounds(c);
-            }
-        }
-
-        private float ScaleFactor => Math.Min((float)ClientSize.Width / DesignW, (float)ClientSize.Height / DesignH);
-
-        private void ApplyScale()
-        {
-            if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
-            float s = ScaleFactor;
-            int ox = (int)((ClientSize.Width - DesignW * s) / 2);
-            int oy = (int)((ClientSize.Height - DesignH * s) / 2);
-
-            foreach (var (c, b) in _baseBounds)
-            {
-                bool topLevel = c.Parent == this;
-                int x = (int)Math.Round(b.X * s) + (topLevel ? ox : 0);
-                int y = (int)Math.Round(b.Y * s) + (topLevel ? oy : 0);
-                c.SetBounds(x, y, (int)Math.Round(b.Width * s), (int)Math.Round(b.Height * s));
-                if (c is IBkFontSize f)
-                    c.Font = Assets.Andy(Math.Max(6f, f.FontSizePx * s));
-            }
-            Invalidate(true);
-        }
-
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            if (_baseBounds.Count > 0) ApplyScale();
-        }
-
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            using (var b = new SolidBrush(Assets.Blueprint))
-                g.FillRectangle(b, ClientRectangle);
-
-            var bg = Assets.Background;
-            if (bg == null) return;
-            float s = ScaleFactor;
-            int w = (int)(DesignW * s), h = (int)(DesignH * s);
-            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-            g.DrawImage(bg, (ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
-        }
-
-        // keep the window 16:9 while the user drags an edge
-        private const int WM_SIZING = 0x214;
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct RECT { public int Left, Top, Right, Bottom; }
-
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == WM_SIZING)
-            {
-                var r = Marshal.PtrToStructure<RECT>(m.LParam);
-                int chromeW = Width - ClientSize.Width;
-                int chromeH = Height - ClientSize.Height;
-                float ratio = (float)DesignW / DesignH;
-
-                int edge = m.WParam.ToInt32();
-                int clientW = (r.Right - r.Left) - chromeW;
-                int clientH = (r.Bottom - r.Top) - chromeH;
-
-                switch (edge)
-                {
-                    case 1: // left
-                    case 2: // right
-                        clientH = (int)Math.Round(clientW / ratio);
-                        r.Bottom = r.Top + clientH + chromeH;
-                        break;
-                    case 3: // top
-                    case 6: // bottom
-                        clientW = (int)Math.Round(clientH * ratio);
-                        r.Right = r.Left + clientW + chromeW;
-                        break;
-                    default: // corners: follow the width
-                        clientH = (int)Math.Round(clientW / ratio);
-                        if (edge == 4 || edge == 5) // top corners grow upward
-                            r.Top = r.Bottom - clientH - chromeH;
-                        else
-                            r.Bottom = r.Top + clientH + chromeH;
-                        break;
-                }
-                Marshal.StructureToPtr(r, m.LParam, true);
-            }
-            base.WndProc(ref m);
-        }
-
         // ------------------------------------------------------------- nav
 
-        private void NavSetup_Click(object? sender, EventArgs e)
+        private void NavSetup_Click()
         {
             ShowPage(pageSetup, navSetup);
             RefreshSetupStatus();
         }
 
-        private void NavKeybinds_Click(object? sender, EventArgs e)
+        private void NavKeybinds_Click()
         {
             LoadKeybindsIntoUi();
             ShowPage(pageKeybinds, navKeybinds);
         }
 
-        private void NavPlay_Click(object? sender, EventArgs e) => LaunchGame();
-
-        private void NavCredits_Click(object? sender, EventArgs e) => ShowPage(pageCredits, navCredits);
-
-        private void CreditsGithubButton_Click(object? sender, EventArgs e) =>
-            Process.Start(new ProcessStartInfo("https://github.com/masterspike52/reNut") { UseShellExecute = true });
-
-        private void CreditsDiscordButton_Click(object? sender, EventArgs e) =>
-            Process.Start(new ProcessStartInfo("https://discord.gg/D5Bz2ZsHdY") { UseShellExecute = true });
+        // UseShellExecute hands the url to the default browser (xdg-open on Linux)
+        private static void OpenUrl(string url) =>
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
         private void ShowPage(BkPagePanel page, BkButton nav)
         {
             foreach (var p in new[] { pageSetup, pageKeybinds, pageCredits })
-                p.Visible = p == page;
+                p.IsVisible = p == page;
             foreach (var b in new[] { navSetup, navKeybinds, navCredits })
-            {
                 b.Selected = b == nav;
-                b.Invalidate();
-            }
         }
 
         // ------------------------------------------------------------- setup
 
-        private void BrowseButton_Click(object? sender, EventArgs e)
+        private async Task BrowseButton_Click()
         {
-            using var dlg = new FolderBrowserDialog
+            var start = await StorageProvider.TryGetFolderFromPathAsync(
+                Directory.Exists(_state.InstallDir) ? _state.InstallDir : AppContext.BaseDirectory);
+            var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
-                Description = "Where should reNut live?",
-                SelectedPath = Directory.Exists(_state.InstallDir) ? _state.InstallDir : AppContext.BaseDirectory,
-            };
-            if (dlg.ShowDialog(this) == DialogResult.OK)
+                Title = "Where should reNut live?",
+                SuggestedStartLocation = start,
+            });
+            string? path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+            if (path != null)
             {
-                _state.InstallDir = dlg.SelectedPath;
+                _state.InstallDir = path;
                 installBox.Value = _state.InstallDir;
                 _state.Save();
                 RefreshSetupStatus();
             }
-        }
-
-        private async void GetRenutButton_Click(object? sender, EventArgs e) => await RunBusy(DoDownloadRenut);
-        private async void GetXisoButton_Click(object? sender, EventArgs e) => await RunBusy(DoDownloadXiso);
-        private async void ExtractButton_Click(object? sender, EventArgs e) => await RunBusy(DoPickIsoAndExtract);
-
-        private async void DoAllButton_Click(object? sender, EventArgs e)
-        {
-            await RunBusy(async () =>
-            {
-                await DoDownloadRenut();
-                await DoDownloadXiso();
-                await DoPickIsoAndExtract();
-            });
         }
 
         private void RefreshSetupStatus()
@@ -322,7 +325,9 @@ namespace NutStaller
             finally
             {
                 _busy = false;
-                progressBar.Value = 0;
+                // Progress<T> posts its reports, so the last one can land after
+                // this; queue the reset behind them
+                Dispatcher.UIThread.Post(() => progressBar.Value = 0, DispatcherPriority.Background);
                 RefreshSetupStatus();
                 RefreshUpdateButton();
             }
@@ -348,8 +353,7 @@ namespace NutStaller
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
 
-            MessageBox.Show(this, ex.Message, "NutStaller - something went wrong",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            _ = MessageDialog.Show(this, ex.Message, "NutStaller - something went wrong");
         }
 
         private async Task DoDownloadRenut()
@@ -359,13 +363,24 @@ namespace NutStaller
             var asset = await GithubDownloader.GetLatestAssetAsync("masterspike52/reNut", RenutAssetRank);
 
             SetStatus($"Downloading {asset.Name} ({asset.Tag})...");
-            string zip = Path.Combine(Path.GetTempPath(), asset.Name);
-            await GithubDownloader.DownloadAsync(asset, zip, new Progress<double>(v => progressBar.Value = v));
+            string download = Path.Combine(Path.GetTempPath(), asset.Name);
+            await GithubDownloader.DownloadAsync(asset, download, new Progress<double>(v => progressBar.Value = v));
 
-            SetStatus("Unpacking reNut...");
-            GithubDownloader.ExtractZip(zip, _state.InstallDir);
-            GithubDownloader.FlattenSingleFolder(_state.InstallDir);
-            File.Delete(zip);
+            if (OperatingSystem.IsWindows())
+            {
+                SetStatus("Unpacking reNut...");
+                GithubDownloader.ExtractZip(download, _state.InstallDir);
+                GithubDownloader.FlattenSingleFolder(_state.InstallDir);
+                File.Delete(download);
+            }
+            else
+            {
+                // the AppImage is the whole game; renamed so the launcher finds it
+                // whatever the release called it
+                Directory.CreateDirectory(_state.InstallDir);
+                File.Move(download, _state.RenutExe, overwrite: true);
+                MakeExecutable(_state.RenutExe);
+            }
 
             _state.WriteRenutCfg();
             _state.RenutVersion = asset.Tag;
@@ -378,7 +393,9 @@ namespace NutStaller
             _state.InstallDir = installBox.Value.Trim();
             SetStatus("Looking up the latest extract-xiso build...");
             var asset = await GithubDownloader.GetLatestAssetAsync("XboxDev/extract-xiso",
-                n => n.Contains("Win64_Release", StringComparison.OrdinalIgnoreCase) ? 2
+                n => !OperatingSystem.IsWindows()
+                        ? (n.Contains(OperatingSystem.IsMacOS() ? "macOS" : "Linux", StringComparison.OrdinalIgnoreCase) ? 1 : -1)
+                   : n.Contains("Win64_Release", StringComparison.OrdinalIgnoreCase) ? 2
                    : n.Contains("Win32_Release", StringComparison.OrdinalIgnoreCase) ? 1 : -1);
 
             SetStatus($"Downloading {asset.Name}...");
@@ -391,12 +408,14 @@ namespace NutStaller
             GithubDownloader.ExtractZip(zip, tmp);
             File.Delete(zip);
 
-            string? exe = Directory.EnumerateFiles(tmp, "*.exe", SearchOption.AllDirectories)
-                .FirstOrDefault(f => Path.GetFileName(f).Contains("xiso", StringComparison.OrdinalIgnoreCase));
-            if (exe == null) throw new InvalidOperationException("extract-xiso.exe not found in the release zip.");
+            string exeName = Path.GetFileName(_state.XisoExe);
+            string? exe = Directory.EnumerateFiles(tmp, "*", SearchOption.AllDirectories)
+                .FirstOrDefault(f => Path.GetFileName(f).Equals(exeName, StringComparison.OrdinalIgnoreCase));
+            if (exe == null) throw new InvalidOperationException($"{exeName} not found in the release zip.");
 
             Directory.CreateDirectory(_state.ToolsDir);
             File.Copy(exe, _state.XisoExe, overwrite: true);
+            MakeExecutable(_state.XisoExe);
             Directory.Delete(tmp, true);
 
             _state.XisoVersion = asset.Tag;
@@ -418,13 +437,17 @@ namespace NutStaller
             }
             else
             {
-                using var dlg = new OpenFileDialog
+                var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
                 {
                     Title = "Pick your Banjo-Kazooie: Nuts & Bolts (US) ISO",
-                    Filter = "Xbox 360 ISO (*.iso)|*.iso|All files (*.*)|*.*",
-                };
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                iso = dlg.FileName;
+                    FileTypeFilter = new[]
+                    {
+                        new FilePickerFileType("Xbox 360 ISO") { Patterns = new[] { "*.iso", "*.ISO" } },
+                        FilePickerFileTypes.All,
+                    },
+                });
+                iso = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+                if (iso == null) return;
             }
             Directory.CreateDirectory(_state.GameDataDir);
 
@@ -434,12 +457,12 @@ namespace NutStaller
             // the folder is cleared by hand. Do it for them.
             if (HasExtractedData(_state.GameDataDir, iso))
             {
-                var answer = MessageBox.Show(this,
+                bool replace = await MessageDialog.Show(this,
                     $"{_state.GameDataDir}{Environment.NewLine}{Environment.NewLine}" +
                     "already holds game data, and extract-xiso cannot write over it." +
                     $"{Environment.NewLine}{Environment.NewLine}Replace it and extract again?",
-                    "Replace existing game data?", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-                if (answer != DialogResult.Yes)
+                    "Replace existing game data?", yesNo: true);
+                if (!replace)
                 {
                     SetStatus("Extraction cancelled - existing game data was kept.");
                     return;
@@ -643,12 +666,18 @@ namespace NutStaller
                 SetStatus("reNut is not installed yet. Run setup first.");
                 return;
             }
-            Process.Start(new ProcessStartInfo
+            try
             {
-                FileName = _state.RenutExe,
-                WorkingDirectory = _state.InstallDir,
-                UseShellExecute = true,
-            });
+                // started directly, not through the shell: on Linux UseShellExecute
+                // would hand the AppImage to xdg-open instead of running it
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = _state.RenutExe,
+                    WorkingDirectory = _state.InstallDir,
+                    UseShellExecute = false,
+                });
+            }
+            catch (Exception ex) { ReportFailure(ex); }
         }
 
         // ------------------------------------------------------------- keybinds
@@ -669,21 +698,16 @@ namespace NutStaller
                 string label = key.Replace("bind_", "").Replace('_', ' ').ToUpperInvariant();
                 var lbl = new BkLabel { Text = label, Dim = true, FontSizePx = 18 };
                 var field = new BkKeyField { KeyName = toml.GetString(key) };
-                pageKeybinds.Controls.Add(lbl);
-                pageKeybinds.Controls.Add(field);
+                Place(pageKeybinds, lbl, 16, y, 220, 30);
+                Place(pageKeybinds, field, 246, y, 140, 30);
                 _binds[key] = field;
-
-                _baseBounds[lbl] = new Rectangle(16, y, 220, 30);
-                _baseBounds[field] = new Rectangle(246, y, 140, 30);
             }
 
             foreach (var (key, field) in _binds)
                 if (toml.Has(key)) field.KeyName = toml.GetString(key);
-
-            ApplyScale();
         }
 
-        private void SaveKeybindsButton_Click(object? sender, EventArgs e)
+        private void SaveKeybindsButton_Click()
         {
             try
             {
@@ -691,7 +715,7 @@ namespace NutStaller
                 foreach (var (key, field) in _binds)
                     if (field.KeyName.Trim().Length > 0)
                         toml.SetString(key, field.KeyName.Trim());
-                Directory.CreateDirectory(_state.InstallDir);
+                Directory.CreateDirectory(Path.GetDirectoryName(_state.RenutToml)!);
                 toml.Save();
                 keybindsStatus.SetText("SAVED");
             }

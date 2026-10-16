@@ -1,17 +1,30 @@
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Styling;
+using Avalonia.Themes.Fluent;
+
 namespace NutStaller
 {
     internal static class Program
     {
-        /// <summary>
-        ///  The main entry point for the application.
-        /// </summary>
         [STAThread]
-        static void Main()
+        static void Main(string[] args) =>
+            AppBuilder.Configure<App>().UsePlatformDetect().StartWithClassicDesktopLifetime(args);
+    }
+
+    internal class App : Application
+    {
+        public override void Initialize()
         {
-            // To customize application configuration such as set high DPI settings or default font,
-            // see https://aka.ms/applicationconfiguration.
-            ApplicationConfiguration.Initialize();
-            Application.Run(new NutStallerMainWindow());
+            Styles.Add(new FluentTheme());
+            RequestedThemeVariant = ThemeVariant.Dark;
+        }
+
+        public override void OnFrameworkInitializationCompleted()
+        {
+            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                desktop.MainWindow = new NutStallerMainWindow();
+            base.OnFrameworkInitializationCompleted();
         }
     }
 }
