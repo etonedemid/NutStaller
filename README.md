@@ -12,6 +12,7 @@ Banjo-Kazooie: Nuts & Bolts.
 - Writes `renut.cfg` so the in-game path wizard never shows up
 - Edits keybinds in `renut.toml`
 - Checks for reNut updates
+- Workshop: browse community vehicle blueprints in a grid, download them into your save or remove them again, and share your own (through [nutstaller-workshop](https://github.com/etonedemid/nutstaller-workshop))
 - Works with mouse or a gamepad (dpad moves, A selects, LB/RB switch page, Start plays)
 - Runs on Windows and Linux (on Linux it installs the reNut AppImage; gamepad support uses SDL2 if installed)
 

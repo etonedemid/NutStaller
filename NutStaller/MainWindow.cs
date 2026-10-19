@@ -28,6 +28,7 @@ namespace NutStaller
         private readonly BkButton navSetup = new() { Text = "Set Up Game", Selected = true };
         private readonly BkButton navUpdate = new() { Text = "Check Updates" };
         private readonly BkButton navKeybinds = new() { Text = "Keybinds" };
+        private readonly BkButton navWorkshop = new() { Text = "Workshop" };
         private readonly BkButton navCredits = new() { Text = "Credits" };
         private readonly BkButton navPlay = new() { Text = "Play", FontSizePx = 24 };
 
@@ -44,6 +45,26 @@ namespace NutStaller
         private readonly BkLabel keybindsStatus = new() { Dim = true, FontSizePx = 16 };
 
         private readonly BkPagePanel pageCredits = new() { IsVisible = false };
+
+        // The workshop is its own scene over the menu: Browse, Installed, Share.
+        private readonly Canvas workshopScene = new() { IsVisible = false };
+        private readonly BkButton tabBrowse = new() { Text = "Browse", Selected = true };
+        private readonly BkButton tabInstalled = new() { Text = "Installed" };
+        private readonly BkButton tabShare = new() { Text = "Share" };
+        private readonly ScrollViewer browsePane = new();
+        private readonly WrapPanel browseGrid = new();
+        private readonly ScrollViewer installedPane = new() { IsVisible = false };
+        private readonly WrapPanel installedGrid = new();
+        private readonly Canvas sharePane = new() { IsVisible = false };
+        private readonly BkButton workshopBack = new() { Text = "Back", FontSizePx = 20 };
+        private readonly BkButton workshopRefresh = new() { Text = "Refresh", FontSizePx = 18 };
+        private readonly BkLabel workshopStatus = new() { Dim = true, FontSizePx = 16 };
+
+        private readonly BkLabel shareVehicle = new() { FontSizePx = 18 };
+        private readonly BkValueBox shareName = new();
+        private readonly BkValueBox shareDescription = new() { FontSizePx = 15 };
+        private readonly Image sharePreview = new() { Stretch = Stretch.Uniform };
+        private readonly BkLabel shareStatus = new() { Dim = true, FontSizePx = 16 };
 
         public NutStallerMainWindow()
         {
@@ -69,7 +90,7 @@ namespace NutStaller
                 activate: ActivatePadControl,
                 cyclePage: CyclePage,
                 start: () => navPlay.PerformClick(),
-                back: () => CurrentNav().Focus());
+                back: () => { if (workshopScene.IsVisible) CloseWorkshop(); else CurrentNav().Focus(); });
             Closed += (s, e) => _gamepad?.Dispose();
 
             _ = CheckForUpdatesAsync();
@@ -101,11 +122,12 @@ namespace NutStaller
         {
             _root.Children.Add(new Image { Source = Assets.Background, Width = DesignW, Height = DesignH });
 
-            Place(_root, navSetup, 402, 335, 185, 32).Click += (s, e) => NavSetup_Click();
-            Place(_root, navUpdate, 402, 371, 185, 32).Click += async (s, e) => await NavUpdate_Click();
-            Place(_root, navKeybinds, 402, 409, 185, 32).Click += (s, e) => NavKeybinds_Click();
-            Place(_root, navCredits, 402, 445, 185, 32).Click += (s, e) => ShowPage(pageCredits, navCredits);
-            Place(_root, navPlay, 402, 496, 185, 36).Click += (s, e) => LaunchGame();
+            Place(_root, navSetup, 402, 328, 185, 32).Click += (s, e) => NavSetup_Click();
+            Place(_root, navUpdate, 402, 363, 185, 32).Click += async (s, e) => await NavUpdate_Click();
+            Place(_root, navKeybinds, 402, 398, 185, 32).Click += (s, e) => NavKeybinds_Click();
+            Place(_root, navWorkshop, 402, 433, 185, 32).Click += (s, e) => NavWorkshop_Click();
+            Place(_root, navCredits, 402, 468, 185, 32).Click += (s, e) => ShowPage(pageCredits, navCredits);
+            Place(_root, navPlay, 402, 510, 185, 36).Click += (s, e) => LaunchGame();
 
             var p = Place(_root, pageSetup, 634, 281, 551, 323);
             Label(p, "SET UP RENUT", 18, 16, 300, 30, 26);
@@ -153,6 +175,227 @@ namespace NutStaller
             Button(p, "reNut on GitHub", 16, 268, 240, 32, () => OpenUrl("https://github.com/masterspike52/reNut"), 20);
             Button(p, "Join the Discord", 268, 268, 240, 32, () => OpenUrl("https://discord.gg/D5Bz2ZsHdY"), 20);
             Label(p, "GAMEPAD: DPAD MOVE - A SELECT - LB/RB SWITCH PAGE - START PLAY", 16, 330, 516, 24, 14, true);
+            BuildWorkshopPages();
+        }
+
+        private void BuildWorkshopPages()
+        {
+            var sc = Place(_root, workshopScene, 0, 0, DesignW, DesignH);
+            sc.Children.Add(new Image { Source = Assets.Background, Width = DesignW, Height = DesignH });
+            var p = Place(sc, new BkPagePanel { Background = new SolidColorBrush(Color.FromArgb(215, 14, 28, 80)) },
+                30, 24, 1140, 627);
+            Label(p, "WORKSHOP", 22, 14, 190, 36, 30);
+            Place(p, tabBrowse, 220, 16, 150, 32).Click += (s, e) => ShowTab(tabBrowse);
+            Place(p, tabInstalled, 380, 16, 150, 32).Click += (s, e) => ShowTab(tabInstalled);
+            Place(p, tabShare, 540, 16, 150, 32).Click += (s, e) => ShowTab(tabShare);
+            Place(p, workshopBack, 1010, 16, 110, 32).Click += (s, e) => CloseWorkshop();
+
+            browsePane.Content = browseGrid;
+            installedPane.Content = installedGrid;
+            foreach (var pane in new[] { browsePane, installedPane })
+            {
+                pane.HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
+                Place(p, pane, 14, 62, 1114, 512);
+            }
+            Place(p, workshopRefresh, 1000, 584, 120, 30).Click += (s, e) => _ = RefreshWorkshop();
+            Place(p, workshopStatus, 22, 584, 960, 30);
+
+            var sh = Place(p, sharePane, 14, 62, 1114, 512);
+            Label(sh, "SHARE ONE OF YOUR VEHICLES", 10, 6, 600, 30, 22);
+            Label(sh, "VEHICLE", 10, 50, 120, 30, dim: true);
+            Button(sh, "<", 130, 50, 34, 30, () => PickVehicle(-1), 18);
+            Place(sh, shareVehicle, 174, 50, 300, 30);
+            Button(sh, ">", 480, 50, 34, 30, () => PickVehicle(1), 18);
+            Label(sh, "NAME", 10, 92, 120, 30, dim: true);
+            Place(sh, shareName, 130, 92, 384, 30);
+            Label(sh, "ABOUT IT", 10, 134, 120, 30, dim: true);
+            Place(sh, shareDescription, 130, 134, 384, 30);
+            Button(sh, "Pick screenshot", 10, 186, 220, 32, () => _ = PickScreenshot(), 18);
+            Label(sh, "A PICTURE OF THE VEHICLE, FROM THE GAME OR ANYWHERE", 10, 226, 504, 24, 14, true);
+            Button(sh, "Copy and open GitHub", 10, 272, 260, 34, () => _ = CopySubmission(), 20);
+            Place(sh, shareStatus, 10, 316, 504, 60);
+            Label(sh, "NUTSTALLER COPIES YOUR VEHICLE AND PICTURE. PASTE IT INTO THE GITHUB FORM, " +
+                "TICK THE BOX AND SUBMIT. A BOT PUBLISHES IT WITHIN A MINUTE (3 PER 10 MINUTES).",
+                10, 400, 504, 80, 14, true);
+            Place(sh, sharePreview, 540, 50, 560, 315);
+        }
+
+        // ------------------------------------------------------------- workshop
+
+        private List<Workshop.Entry>? _entries;
+        private List<Workshop.Installed> _installed = new();
+        private readonly Dictionary<string, Avalonia.Media.Imaging.Bitmap> _previews = new();
+        private List<Workshop.LocalVehicle> _vehicles = new();
+        private int _vehicleIndex;
+        private string? _screenshot;
+
+        private string SaveDir => Workshop.SaveDir(_state);
+
+        private void NavWorkshop_Click()
+        {
+            workshopScene.IsVisible = true;
+            ShowTab(tabBrowse);
+            if (_entries == null) _ = RefreshWorkshop();
+            tabBrowse.Focus();
+        }
+
+        private void CloseWorkshop()
+        {
+            workshopScene.IsVisible = false;
+            navWorkshop.Focus();
+        }
+
+        private void ShowTab(BkButton tab)
+        {
+            foreach (var t in new[] { tabBrowse, tabInstalled, tabShare }) t.Selected = t == tab;
+            browsePane.IsVisible = tab == tabBrowse;
+            installedPane.IsVisible = tab == tabInstalled;
+            sharePane.IsVisible = tab == tabShare;
+            workshopRefresh.IsVisible = tab == tabBrowse;
+            if (tab == tabShare) OpenShare();
+            else RebuildGrids();
+        }
+
+        private async Task RefreshWorkshop()
+        {
+            workshopStatus.SetText("LOADING THE WORKSHOP...");
+            try { _entries = await Workshop.FetchIndexAsync(); }
+            catch (Exception ex)
+            {
+                workshopStatus.SetText("COULD NOT REACH THE WORKSHOP: " + ex.Message.Split('\n')[0].ToUpperInvariant());
+                return;
+            }
+            RebuildGrids();
+        }
+
+        private void RebuildGrids()
+        {
+            _installed = Workshop.LoadInstalled(SaveDir);
+            browseGrid.Children.Clear();
+            foreach (var e in _entries ?? new())
+                browseGrid.Children.Add(Tile(e.Name, e.Author, e.Description, e.Parts, e.PreviewPath, e.Id, e));
+            installedGrid.Children.Clear();
+            foreach (var i in _installed)
+                installedGrid.Children.Add(Tile(i.Name, i.Author, i.Description, i.Parts, i.PreviewPath, i.Id, null));
+            if (installedPane.IsVisible)
+                workshopStatus.SetText(_installed.Count == 0 ? "NOTHING INSTALLED FROM THE WORKSHOP YET"
+                    : $"{_installed.Count} INSTALLED - THEY ARE IN THE GAME'S GARAGE WITH YOUR OWN VEHICLES");
+            else if (_entries != null)
+                workshopStatus.SetText(_entries.Count == 0 ? "NOTHING HERE YET - SHARE THE FIRST ONE!"
+                    : $"{_entries.Count} BLUEPRINTS - {_installed.Count} INSTALLED");
+        }
+
+        // One card of the grid: picture, name, author, about, Download or Remove.
+        private Control Tile(string name, string author, string description, int parts, string preview,
+            string id, Workshop.Entry? entry)
+        {
+            var tile = new Canvas
+            {
+                Width = 266, Height = 262, Margin = new Thickness(6),
+                Background = new SolidColorBrush(Color.FromArgb(110, 0, 0, 40)),
+            };
+            var image = Place(tile, new Image { Stretch = Stretch.UniformToFill }, 4, 4, 258, 145);
+            Place(tile, new BkLabel { Text = name, FontSizePx = 19 }, 6, 152, 254, 24);
+            Place(tile, new BkLabel { Text = $"BY {author}".ToUpperInvariant(), FontSizePx = 13, Dim = true }, 6, 176, 254, 18);
+            Place(tile, new BkLabel { Text = description, FontSizePx = 13, Dim = true }, 6, 194, 254, 32);
+            Place(tile, new BkLabel { Text = $"{parts} PARTS", FontSizePx = 13, Dim = true }, 6, 232, 120, 24);
+            bool installed = _installed.Any(i => i.Id == id);
+            if (installed)
+                Button(tile, "Remove", 136, 228, 124, 30, () => RemoveBlueprint(id, name), 18);
+            else if (entry != null)
+                Button(tile, "Download", 136, 228, 124, 30, () => _ = InstallBlueprint(entry), 18);
+            _ = LoadPreview(image, preview);
+            return tile;
+        }
+
+        private async Task LoadPreview(Image image, string path)
+        {
+            try
+            {
+                if (!_previews.TryGetValue(path, out var bmp))
+                {
+                    using var ms = new MemoryStream(await Workshop.DownloadAsync(path));
+                    _previews[path] = bmp = new Avalonia.Media.Imaging.Bitmap(ms);
+                }
+                image.Source = bmp;
+            }
+            catch { } // no picture is fine
+        }
+
+        private async Task InstallBlueprint(Workshop.Entry e)
+        {
+            try
+            {
+                workshopStatus.SetText($"DOWNLOADING {e.Name.ToUpperInvariant()}...");
+                var item = Workshop.InstallEntry(SaveDir, e, await Workshop.DownloadAsync(e.BlueprintPath));
+                RebuildGrids();
+                workshopStatus.SetText($"INSTALLED {e.Name.ToUpperInvariant()} ({item.ContentId}) - LOAD IT IN THE GARAGE");
+            }
+            catch (Exception ex) { workshopStatus.SetText("DOWNLOAD FAILED: " + ex.Message.ToUpperInvariant()); }
+        }
+
+        private void RemoveBlueprint(string id, string name)
+        {
+            try
+            {
+                Workshop.Remove(SaveDir, id);
+                RebuildGrids();
+                workshopStatus.SetText($"REMOVED {name.ToUpperInvariant()} FROM YOUR SAVE");
+            }
+            catch (Exception ex) { workshopStatus.SetText("REMOVE FAILED: " + ex.Message.ToUpperInvariant()); }
+        }
+
+        // Your own builds only: the workshop's are someone else's to share.
+        private void OpenShare()
+        {
+            var fromWorkshop = Workshop.LoadInstalled(SaveDir)
+                .Select(i => Path.GetFullPath(Path.Combine(SaveDir, "00000001", i.ContentId, i.ContentId[2..]))).ToHashSet();
+            _vehicles = Workshop.LocalVehicles(SaveDir).Where(v => !fromWorkshop.Contains(Path.GetFullPath(v.File))).ToList();
+            _vehicleIndex = Math.Min(_vehicleIndex, Math.Max(0, _vehicles.Count - 1));
+            PickVehicle(0);
+            workshopStatus.SetText("");
+            shareStatus.SetText(_vehicles.Count == 0 ? "NO VEHICLES IN YOUR SAVE YET - BUILD ONE IN THE GAME FIRST" : "");
+        }
+
+        private void PickVehicle(int delta)
+        {
+            if (_vehicles.Count == 0) { shareVehicle.SetText("NONE"); return; }
+            _vehicleIndex = (_vehicleIndex + delta + _vehicles.Count) % _vehicles.Count;
+            shareVehicle.SetText(_vehicles[_vehicleIndex].Name);
+            shareName.Value = _vehicles[_vehicleIndex].Name;
+        }
+
+        private async Task PickScreenshot()
+        {
+            var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Pick a picture of the vehicle",
+                FileTypeFilter = new[] { FilePickerFileTypes.ImageAll },
+            });
+            string? path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+            if (path == null) return;
+            try
+            {
+                sharePreview.Source = new Avalonia.Media.Imaging.Bitmap(path);
+                _screenshot = path;
+            }
+            catch { shareStatus.SetText("THAT PICTURE COULD NOT BE READ"); }
+        }
+
+        private async Task CopySubmission()
+        {
+            if (_vehicles.Count == 0) { shareStatus.SetText("NO VEHICLE TO SHARE"); return; }
+            if (shareName.Value.Trim().Length == 0) { shareStatus.SetText("GIVE IT A NAME"); return; }
+            if (_screenshot == null) { shareStatus.SetText("PICK A SCREENSHOT FIRST"); return; }
+            try
+            {
+                string json = Workshop.BuildSubmission(File.ReadAllBytes(_vehicles[_vehicleIndex].File),
+                    shareName.Value, shareDescription.Value, _screenshot);
+                await Clipboard!.SetTextAsync(json);
+                OpenUrl(Workshop.SubmitUrl);
+                shareStatus.SetText("COPIED - PASTE IT INTO THE GITHUB FORM, TICK THE BOX, SUBMIT");
+            }
+            catch (Exception ex) { shareStatus.SetText("ERROR: " + ex.Message.ToUpperInvariant()); }
         }
 
         // ------------------------------------------------------------- updates
@@ -218,12 +461,33 @@ namespace NutStaller
 
         private IEnumerable<Control> PadCandidates()
         {
-            foreach (var nav in new Control[] { navSetup, navUpdate, navKeybinds, navCredits, navPlay })
+            if (workshopScene.IsVisible)
+            {
+                foreach (var c in WorkshopPadCandidates()) yield return c;
+                yield break;
+            }
+            foreach (var nav in new Control[] { navSetup, navUpdate, navKeybinds, navWorkshop, navCredits, navPlay })
                 yield return nav;
             var page = CurrentPage();
             foreach (var c in page.Children)
                 if (c is BkButton or BkValueBox or BkKeyField)
                     yield return c;
+        }
+
+        private IEnumerable<Control> WorkshopPadCandidates()
+        {
+            foreach (var c in new Control[] { tabBrowse, tabInstalled, tabShare })
+                yield return c;
+            yield return workshopBack;
+            if (workshopRefresh.IsVisible) yield return workshopRefresh;
+            if (sharePane.IsVisible)
+                foreach (var c in sharePane.Children)
+                    if (c is BkButton or BkValueBox) yield return c;
+            var grid = browsePane.IsVisible ? browseGrid : installedPane.IsVisible ? installedGrid : null;
+            if (grid != null)
+                foreach (var tile in grid.Children.OfType<Canvas>())
+                    foreach (var b in tile.Children.OfType<BkButton>())
+                        yield return b;
         }
 
         private void ActivatePadControl(Control c)
@@ -252,6 +516,14 @@ namespace NutStaller
 
         private void CyclePage(int delta)
         {
+            if (workshopScene.IsVisible)
+            {
+                var tabs = new[] { tabBrowse, tabInstalled, tabShare };
+                var tab = tabs[(Array.FindIndex(tabs, t => t.Selected) + delta + tabs.Length) % tabs.Length];
+                ShowTab(tab);
+                tab.Focus();
+                return;
+            }
             var navs = new[] { navSetup, navKeybinds, navCredits };
             int idx = Array.IndexOf(navs, CurrentNav());
             var next = navs[(idx + delta + navs.Length) % navs.Length];
