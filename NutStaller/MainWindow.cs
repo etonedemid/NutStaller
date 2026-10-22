@@ -55,6 +55,9 @@ namespace NutStaller
         private readonly BkLabel savesSummary = new() { FontSizePx = 17 };
         private readonly StackPanel backupList = new() { Spacing = 4 };
         private readonly BkLabel savesStatus = new() { Dim = true, FontSizePx = 15 };
+        private readonly BkLabel savesListTitle = new() { Text = "BACKUPS", Dim = true, FontSizePx = 14 };
+        private List<Saves.Vehicle>? _pickVehicles;      // Import vehicles: the other save's
+        private readonly HashSet<int> _picked = new();
 
         // The workshop is its own scene over the menu: Browse (vehicles), Parts
         // (reNut part mods), Installed, Share.
@@ -188,9 +191,10 @@ namespace NutStaller
             Place(p, savesWhere, 16, 44, 400, 22);
             Button(p, "Open folder", 420, 40, 110, 28, () => OpenUrl(SaveDir), 15);
             Place(p, savesSummary, 16, 70, 516, 26);
-            Button(p, "Back up now", 16, 102, 160, 32, () => SavesAction(() => $"BACKED UP TO {Path.GetFileName(Saves.BackUp(SaveDir))}"), 18);
-            Button(p, "Import a save...", 186, 102, 190, 32, () => _ = ImportSave(), 18);
-            Label(p, "BACKUPS", 16, 142, 200, 22, 14, true);
+            Button(p, "Back up now", 16, 102, 146, 32, () => SavesAction(() => $"BACKED UP TO {Path.GetFileName(Saves.BackUp(SaveDir))}"), 17);
+            Button(p, "Import a save...", 170, 102, 172, 32, () => _ = ImportSave(), 17);
+            Button(p, "Import vehicles...", 350, 102, 182, 32, () => _ = ImportVehicles(), 17);
+            Place(p, savesListTitle, 16, 142, 516, 22);
             Place(p, new ScrollViewer { Content = backupList }, 16, 164, 516, 172);
             Place(p, savesStatus, 16, 340, 516, 36);
 
@@ -595,6 +599,7 @@ namespace NutStaller
 
         private void NavSaves_Click()
         {
+            _pickVehicles = null;
             ShowPage(pageSaves, navSaves);
             savesStatus.SetText("");
             RefreshSaves();
@@ -607,6 +612,12 @@ namespace NutStaller
             savesSummary.SetText(sum.Bytes == 0 ? "NO SAVE YET - PLAY THE GAME ONCE, OR IMPORT ONE"
                 : $"{sum.Slots} SAVE SLOT(S) - {sum.Vehicles} VEHICLES - {sum.Replays} REPLAYS - {Math.Max(1, sum.Bytes / 1024)} KB");
             backupList.Children.Clear();
+            savesListTitle.SetText(_pickVehicles == null ? "BACKUPS" : "PICK THE VEHICLES TO ADD TO YOUR SAVE");
+            if (_pickVehicles != null)
+            {
+                ShowVehiclePicker(_pickVehicles);
+                return;
+            }
             foreach (var b in Saves.Backups(SaveDir))
             {
                 var row = new Canvas { Height = 30, Width = 500 };
@@ -657,33 +668,98 @@ namespace NutStaller
             SavesAction(() => { File.Delete(b.File); return "BACKUP DELETED"; });
         }
 
-        // A save from elsewhere: a zip (a backup, or a zipped 4D5307ED folder) or
-        // a folder holding the save.
+        // A save from elsewhere (Saves.Normalize): a zip, a folder, or an Xbox
+        // 360 save package; null when cancelled.
+        private async Task<string?> PickSaveSource(string title)
+        {
+            bool file = await MessageDialog.Show(this, "Is the save a single file?" + Environment.NewLine + Environment.NewLine +
+                "Yes: pick it (a .zip, or an Xbox 360 save package)." + Environment.NewLine +
+                "No: pick the folder (the 4D5307ED folder, one that has it inside, or a folder of Xbox 360 saves).",
+                title, yesNo: true);
+            if (file)
+            {
+                var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Pick the save" });
+                return picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+            }
+            var folder = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Pick the save folder" });
+            return folder.Count > 0 ? folder[0].TryGetLocalPath() : null;
+        }
+
         private async Task ImportSave()
         {
-            bool zip = await MessageDialog.Show(this, "Is the save a .zip file?" + Environment.NewLine + Environment.NewLine +
-                "Yes: pick the zip. No: pick the folder (the 4D5307ED folder, or one that has it inside).", "Import a save", yesNo: true);
-            string? path;
-            if (zip)
-            {
-                var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-                {
-                    Title = "Pick a zipped Nuts & Bolts save",
-                    FileTypeFilter = new[] { new FilePickerFileType("Zip") { Patterns = new[] { "*.zip" } } },
-                });
-                path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
-            }
-            else
-            {
-                var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Pick the save folder" });
-                path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
-            }
+            string? path = await PickSaveSource("Import a save");
             if (path == null) return;
             if (!await MessageDialog.Show(this, $"Replace your save with{Environment.NewLine}{path}?" +
                     $"{Environment.NewLine}{Environment.NewLine}Your current save is backed up first.", "Import a save", yesNo: true))
                 return;
             SavesAction(() => Saves.Replace(SaveDir, path, "import") is { } kept
                 ? $"IMPORTED - YOUR OLD SAVE IS IN {Path.GetFileName(kept)}" : "IMPORTED");
+        }
+
+        // Vehicles from another save, picked one by one, added to this one.
+        private async Task ImportVehicles()
+        {
+            string? path = await PickSaveSource("Import vehicles");
+            if (path == null) return;
+            try
+            {
+                var found = Saves.VehiclesIn(path);
+                if (found.Count == 0)
+                {
+                    savesStatus.SetText("NO VEHICLES IN THAT SAVE");
+                    return;
+                }
+                _pickVehicles = found;
+                _picked.Clear();
+                savesStatus.SetText($"{found.Count} VEHICLES FOUND");
+            }
+            catch (Exception ex) { savesStatus.SetText("ERROR: " + ex.Message.ToUpperInvariant()); }
+            RefreshSaves();
+        }
+
+        private void ShowVehiclePicker(List<Saves.Vehicle> vehicles)
+        {
+            // toggled in place, so the list keeps its scroll and the gamepad its focus
+            var top = new Canvas { Height = 34, Width = 500 };
+            var rows = new List<BkButton>();
+            BkButton add = null!, all = null!;
+            void Show()
+            {
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    rows[i].Selected = _picked.Contains(i);
+                    rows[i].Text = $"[{(rows[i].Selected ? "X" : " ")}]  {vehicles[i].Name}";
+                }
+                add.Text = $"Add {_picked.Count} to my save";
+                all.Text = _picked.Count == vehicles.Count ? "None" : "All";
+            }
+            add = Button(top, "", 0, 0, 200, 30, () =>
+            {
+                if (_picked.Count == 0) { savesStatus.SetText("PICK AT LEAST ONE VEHICLE"); return; }
+                var chosen = _picked.OrderBy(i => i).Select(i => vehicles[i]).ToList();
+                _pickVehicles = null;
+                SavesAction(() => $"ADDED {Saves.ImportVehicles(SaveDir, chosen)} VEHICLES - THEY ARE IN THE GARAGE");
+            }, 16);
+            all = Button(top, "", 206, 0, 90, 30, () =>
+            {
+                if (_picked.Count == vehicles.Count) _picked.Clear();
+                else _picked.UnionWith(Enumerable.Range(0, vehicles.Count));
+                Show();
+            }, 16);
+            Button(top, "Cancel", 302, 0, 90, 30, () => { _pickVehicles = null; savesStatus.SetText(""); RefreshSaves(); }, 16);
+            backupList.Children.Add(top);
+            for (int i = 0; i < vehicles.Count; i++)
+            {
+                int index = i;
+                var row = new Canvas { Height = 30, Width = 500 };
+                rows.Add(Button(row, "", 0, 0, 496, 28, () =>
+                {
+                    if (!_picked.Remove(index)) _picked.Add(index);
+                    Show();
+                }, 16));
+                backupList.Children.Add(row);
+            }
+            Show();
         }
 
         // ------------------------------------------------------------- updates
