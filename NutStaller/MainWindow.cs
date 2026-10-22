@@ -30,6 +30,7 @@ namespace NutStaller
         private readonly BkButton navUpdate = new() { Text = "Check Updates" };
         private readonly BkButton navKeybinds = new() { Text = "Keybinds" };
         private readonly BkButton navWorkshop = new() { Text = "Workshop" };
+        private readonly BkButton navSaves = new() { Text = "Saves" };
         private readonly BkButton navCredits = new() { Text = "Credits" };
         private readonly BkButton navPlay = new() { Text = "Play", FontSizePx = 24 };
 
@@ -48,6 +49,12 @@ namespace NutStaller
         private readonly BkLabel keybindsStatus = new() { Dim = true, FontSizePx = 16 };
 
         private readonly BkPagePanel pageCredits = new() { IsVisible = false };
+
+        private readonly BkPagePanel pageSaves = new() { IsVisible = false };
+        private readonly BkLabel savesWhere = new() { Dim = true, FontSizePx = 13 };
+        private readonly BkLabel savesSummary = new() { FontSizePx = 17 };
+        private readonly StackPanel backupList = new() { Spacing = 4 };
+        private readonly BkLabel savesStatus = new() { Dim = true, FontSizePx = 15 };
 
         // The workshop is its own scene over the menu: Browse (vehicles), Parts
         // (reNut part mods), Installed, Share.
@@ -135,12 +142,13 @@ namespace NutStaller
         {
             _root.Children.Add(new Image { Source = Assets.Background, Width = DesignW, Height = DesignH });
 
-            Place(_root, navSetup, 402, 328, 185, 32).Click += (s, e) => NavSetup_Click();
-            Place(_root, navUpdate, 402, 363, 185, 32).Click += async (s, e) => await NavUpdate_Click();
-            Place(_root, navKeybinds, 402, 398, 185, 32).Click += (s, e) => NavKeybinds_Click();
-            Place(_root, navWorkshop, 402, 433, 185, 32).Click += (s, e) => NavWorkshop_Click();
-            Place(_root, navCredits, 402, 468, 185, 32).Click += (s, e) => ShowPage(pageCredits, navCredits);
-            Place(_root, navPlay, 402, 510, 185, 36).Click += (s, e) => LaunchGame();
+            Place(_root, navSetup, 402, 318, 185, 31).Click += (s, e) => NavSetup_Click();
+            Place(_root, navUpdate, 402, 351, 185, 31).Click += async (s, e) => await NavUpdate_Click();
+            Place(_root, navKeybinds, 402, 384, 185, 31).Click += (s, e) => NavKeybinds_Click();
+            Place(_root, navWorkshop, 402, 417, 185, 31).Click += (s, e) => NavWorkshop_Click();
+            Place(_root, navSaves, 402, 450, 185, 31).Click += (s, e) => NavSaves_Click();
+            Place(_root, navCredits, 402, 483, 185, 31).Click += (s, e) => ShowPage(pageCredits, navCredits);
+            Place(_root, navPlay, 402, 522, 185, 36).Click += (s, e) => LaunchGame();
 
             var p = Place(_root, pageSetup, 634, 281, 551, 323);
             Label(p, "SET UP RENUT", 18, 16, 300, 30, 26);
@@ -174,6 +182,17 @@ namespace NutStaller
                 KeyRow(PadKeys[i].Key, PadKeys[i].Label, i);
             Button(p, "Save", 16, 344, 110, 30, SaveKeybindsButton_Click, 20);
             Place(p, keybindsStatus, 136, 344, 320, 30);
+
+            p = Place(_root, pageSaves, 634, 279, 545, 382);
+            Label(p, "SAVES", 16, 10, 200, 30, 26);
+            Place(p, savesWhere, 16, 44, 400, 22);
+            Button(p, "Open folder", 420, 40, 110, 28, () => OpenUrl(SaveDir), 15);
+            Place(p, savesSummary, 16, 70, 516, 26);
+            Button(p, "Back up now", 16, 102, 160, 32, () => SavesAction(() => $"BACKED UP TO {Path.GetFileName(Saves.BackUp(SaveDir))}"), 18);
+            Button(p, "Import a save...", 186, 102, 190, 32, () => _ = ImportSave(), 18);
+            Label(p, "BACKUPS", 16, 142, 200, 22, 14, true);
+            Place(p, new ScrollViewer { Content = backupList }, 16, 164, 516, 172);
+            Place(p, savesStatus, 16, 340, 516, 36);
 
             p = Place(_root, pageCredits, 634, 281, 548, 382);
             Label(p, "CREDITS", 16, 14, 300, 30, 26);
@@ -572,6 +591,91 @@ namespace NutStaller
             catch (Exception ex) { shareStatus.SetText("ERROR: " + ex.Message.ToUpperInvariant()); }
         }
 
+        // ------------------------------------------------------------- saves
+
+        private void NavSaves_Click()
+        {
+            ShowPage(pageSaves, navSaves);
+            savesStatus.SetText("");
+            RefreshSaves();
+        }
+
+        private void RefreshSaves()
+        {
+            savesWhere.SetText(SaveDir);
+            var sum = Saves.Summarize(SaveDir);
+            savesSummary.SetText(sum.Bytes == 0 ? "NO SAVE YET - PLAY THE GAME ONCE, OR IMPORT ONE"
+                : $"{sum.Slots} SAVE SLOT(S) - {sum.Vehicles} VEHICLES - {sum.Replays} REPLAYS - {Math.Max(1, sum.Bytes / 1024)} KB");
+            backupList.Children.Clear();
+            foreach (var b in Saves.Backups(SaveDir))
+            {
+                var row = new Canvas { Height = 30, Width = 500 };
+                Place(row, new BkLabel
+                {
+                    Text = $"{b.Made:yyyy-MM-dd HH:mm:ss} - {Math.Max(1, b.Bytes / 1024)} KB{(b.Note.Length > 0 ? " - " + b.Note.ToUpperInvariant() : "")}",
+                    FontSizePx = 14,
+                }, 4, 3, 300, 24);
+                Button(row, "Restore", 310, 0, 100, 28, () => _ = RestoreBackup(b), 15);
+                Button(row, "Delete", 416, 0, 80, 28, () => _ = DeleteBackup(b), 15);
+                backupList.Children.Add(row);
+            }
+            if (backupList.Children.Count == 0)
+                backupList.Children.Add(new BkLabel { Text = "NO BACKUPS YET", FontSizePx = 14, Dim = true, Height = 24 });
+        }
+
+        private void SavesAction(Func<string> action)
+        {
+            try { savesStatus.SetText(action()); }
+            catch (Exception ex) { savesStatus.SetText("ERROR: " + ex.Message.ToUpperInvariant()); }
+            RefreshSaves();
+        }
+
+        private async Task RestoreBackup(Saves.Backup b)
+        {
+            if (!await MessageDialog.Show(this, $"Replace your save with the backup from {b.Made:yyyy-MM-dd HH:mm:ss}?" +
+                    $"{Environment.NewLine}{Environment.NewLine}Your current save is backed up first.", "Restore a backup", yesNo: true))
+                return;
+            SavesAction(() => Saves.Replace(SaveDir, b.File, "restore") is { } kept
+                ? $"RESTORED - THE SAVE BEFORE IT IS IN {Path.GetFileName(kept)}" : "RESTORED");
+        }
+
+        private async Task DeleteBackup(Saves.Backup b)
+        {
+            if (!await MessageDialog.Show(this, $"Delete the backup from {b.Made:yyyy-MM-dd HH:mm:ss}? This cannot be undone.",
+                    "Delete a backup", yesNo: true))
+                return;
+            SavesAction(() => { File.Delete(b.File); return "BACKUP DELETED"; });
+        }
+
+        // A save from elsewhere: a zip (a backup, or a zipped 4D5307ED folder) or
+        // a folder holding the save.
+        private async Task ImportSave()
+        {
+            bool zip = await MessageDialog.Show(this, "Is the save a .zip file?" + Environment.NewLine + Environment.NewLine +
+                "Yes: pick the zip. No: pick the folder (the 4D5307ED folder, or one that has it inside).", "Import a save", yesNo: true);
+            string? path;
+            if (zip)
+            {
+                var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Pick a zipped Nuts & Bolts save",
+                    FileTypeFilter = new[] { new FilePickerFileType("Zip") { Patterns = new[] { "*.zip" } } },
+                });
+                path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+            }
+            else
+            {
+                var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Pick the save folder" });
+                path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+            }
+            if (path == null) return;
+            if (!await MessageDialog.Show(this, $"Replace your save with{Environment.NewLine}{path}?" +
+                    $"{Environment.NewLine}{Environment.NewLine}Your current save is backed up first.", "Import a save", yesNo: true))
+                return;
+            SavesAction(() => Saves.Replace(SaveDir, path, "import") is { } kept
+                ? $"IMPORTED - YOUR OLD SAVE IS IN {Path.GetFileName(kept)}" : "IMPORTED");
+        }
+
         // ------------------------------------------------------------- updates
 
         private string? _latestTag;
@@ -640,8 +744,11 @@ namespace NutStaller
                 foreach (var c in WorkshopPadCandidates()) yield return c;
                 yield break;
             }
-            foreach (var nav in new Control[] { navSetup, navUpdate, navKeybinds, navWorkshop, navCredits, navPlay })
+            foreach (var nav in new Control[] { navSetup, navUpdate, navKeybinds, navWorkshop, navSaves, navCredits, navPlay })
                 yield return nav;
+            if (pageSaves.IsVisible)
+                foreach (var b in backupList.GetVisualDescendants().OfType<BkButton>())
+                    yield return b;
             var page = CurrentPage();
             foreach (var c in page.Children)
                 if (c is BkButton or BkValueBox or BkKeyField)
@@ -678,6 +785,7 @@ namespace NutStaller
         {
             if (pageKeybinds.IsVisible) return pageKeybinds;
             if (pageCredits.IsVisible) return pageCredits;
+            if (pageSaves.IsVisible) return pageSaves;
             return pageSetup;
         }
 
@@ -685,6 +793,7 @@ namespace NutStaller
         {
             if (pageKeybinds.IsVisible) return navKeybinds;
             if (pageCredits.IsVisible) return navCredits;
+            if (pageSaves.IsVisible) return navSaves;
             return navSetup;
         }
 
@@ -698,7 +807,7 @@ namespace NutStaller
                 tab.Focus();
                 return;
             }
-            var navs = new[] { navSetup, navKeybinds, navCredits };
+            var navs = new[] { navSetup, navKeybinds, navSaves, navCredits };
             int idx = Array.IndexOf(navs, CurrentNav());
             var next = navs[(idx + delta + navs.Length) % navs.Length];
             next.PerformClick();
@@ -725,9 +834,9 @@ namespace NutStaller
 
         private void ShowPage(BkPagePanel page, BkButton nav)
         {
-            foreach (var p in new[] { pageSetup, pageKeybinds, pageCredits })
+            foreach (var p in new[] { pageSetup, pageKeybinds, pageSaves, pageCredits })
                 p.IsVisible = p == page;
-            foreach (var b in new[] { navSetup, navKeybinds, navCredits })
+            foreach (var b in new[] { navSetup, navKeybinds, navSaves, navCredits })
                 b.Selected = b == nav;
         }
 
