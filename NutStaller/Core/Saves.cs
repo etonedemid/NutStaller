@@ -41,8 +41,24 @@ namespace NutStaller.Core
             return Directory.GetFiles(dir, "save-*.zip")
                 .Select(f => new FileInfo(f))
                 .Select(f => new Backup(f.FullName, f.LastWriteTime, f.Length,
-                    f.Name.Contains("-before-") ? f.Name[(f.Name.IndexOf("-before-") + 1)..^4].Replace('-', ' ') : ""))
+                    f.Name.Length > StampLength + 4 ? f.Name[(StampLength + 1)..^4].Replace('-', ' ') : ""))
                 .OrderByDescending(b => b.Made).ToList();
+        }
+
+        // "save-yyyyMMdd-HHmmss"; a name or note follows it after a dash.
+        private const int StampLength = 20;
+
+        // Gives a backup a name (empty clears it). Keeps letters, digits, spaces,
+        // - and _, so the name stays a valid file name everywhere.
+        public static string Rename(string file, string name)
+        {
+            string clean = new string(name.Trim().Where(c => char.IsAsciiLetterOrDigit(c) || c is ' ' or '-' or '_').ToArray())
+                .Replace(' ', '-').Trim('-');
+            if (clean.Length > 60) clean = clean[..60];
+            string stamp = Path.GetFileName(file)[..StampLength];
+            string target = Path.Combine(Path.GetDirectoryName(file)!, stamp + (clean.Length > 0 ? "-" + clean : "") + ".zip");
+            if (target != file) File.Move(file, target);
+            return target;
         }
 
         // note: why it was made ("before-restore", "before-import"), or "".

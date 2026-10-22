@@ -612,11 +612,13 @@ namespace NutStaller
                 var row = new Canvas { Height = 30, Width = 500 };
                 Place(row, new BkLabel
                 {
-                    Text = $"{b.Made:yyyy-MM-dd HH:mm:ss} - {Math.Max(1, b.Bytes / 1024)} KB{(b.Note.Length > 0 ? " - " + b.Note.ToUpperInvariant() : "")}",
+                    Text = b.Note.Length > 0 ? $"{b.Note.ToUpperInvariant()} ({b.Made:MM-dd HH:mm})"
+                        : $"{b.Made:yyyy-MM-dd HH:mm:ss} - {Math.Max(1, b.Bytes / 1024)} KB",
                     FontSizePx = 14,
-                }, 4, 3, 300, 24);
-                Button(row, "Restore", 310, 0, 100, 28, () => _ = RestoreBackup(b), 15);
-                Button(row, "Delete", 416, 0, 80, 28, () => _ = DeleteBackup(b), 15);
+                }, 4, 3, 236, 24);
+                Button(row, "Rename", 240, 0, 84, 28, () => _ = RenameBackup(b), 15);
+                Button(row, "Restore", 328, 0, 88, 28, () => _ = RestoreBackup(b), 15);
+                Button(row, "Delete", 420, 0, 76, 28, () => _ = DeleteBackup(b), 15);
                 backupList.Children.Add(row);
             }
             if (backupList.Children.Count == 0)
@@ -637,6 +639,14 @@ namespace NutStaller
                 return;
             SavesAction(() => Saves.Replace(SaveDir, b.File, "restore") is { } kept
                 ? $"RESTORED - THE SAVE BEFORE IT IS IN {Path.GetFileName(kept)}" : "RESTORED");
+        }
+
+        private async Task RenameBackup(Saves.Backup b)
+        {
+            string? name = await MessageDialog.Ask(this, $"Name the backup from {b.Made:yyyy-MM-dd HH:mm:ss}" +
+                " (letters, digits, spaces, - and _; empty clears it):", "Rename a backup", b.Note);
+            if (name == null) return;
+            SavesAction(() => $"RENAMED TO {Path.GetFileName(Saves.Rename(b.File, name))}");
         }
 
         private async Task DeleteBackup(Saves.Backup b)
