@@ -223,11 +223,29 @@ namespace NutStaller.Ui
             Cursor = new Cursor(StandardCursorType.Hand);
         }
 
+        // The first click arms the field; a click while armed binds that mouse
+        // button (reNut's LMB / RMB / MMB).
         protected override void OnPointerPressed(PointerPressedEventArgs e)
         {
             base.OnPointerPressed(e);
-            BeginListen();
             e.Handled = true;
+            if (!_listening) { BeginListen(); return; }
+            string name = e.GetCurrentPoint(this).Properties.PointerUpdateKind switch
+            {
+                PointerUpdateKind.LeftButtonPressed => "LMB",
+                PointerUpdateKind.RightButtonPressed => "RMB",
+                PointerUpdateKind.MiddleButtonPressed => "MMB",
+                _ => "",
+            };
+            if (name.Length > 0) Pick(name);
+        }
+
+        private void Pick(string name)
+        {
+            KeyName = name;
+            _listening = false;
+            InvalidateVisual();
+            KeyPicked?.Invoke(this, EventArgs.Empty);
         }
 
         protected override void OnLostFocus(RoutedEventArgs e) { _listening = false; base.OnLostFocus(e); }
@@ -240,27 +258,36 @@ namespace NutStaller.Ui
             if (_listening)
             {
                 string name = KeyToName(e.Key);
-                if (name.Length > 0)
-                {
-                    KeyName = name;
-                    _listening = false;
-                    KeyPicked?.Invoke(this, EventArgs.Empty);
-                }
+                if (name.Length > 0) Pick(name);
                 e.Handled = true; // swallows Tab too, so it can be bound
             }
             base.OnKeyDown(e);
         }
 
+        // The names reNut's binds take (the SDK's rex::ui::ParseVirtualKey).
         private static string KeyToName(Key k)
         {
-            if (k >= Key.F1 && k <= Key.F12) return k.ToString();
+            if (k >= Key.F1 && k <= Key.F24) return k.ToString();
             if (k >= Key.A && k <= Key.Z) return k.ToString();
             if (k >= Key.D0 && k <= Key.D9) return k.ToString().Substring(1);
+            if (k >= Key.NumPad0 && k <= Key.NumPad9) return "Numpad" + (k - Key.NumPad0);
             return k switch
             {
-                Key.Tab => "Tab", Key.Space => "Space", Key.Enter => "Enter",
-                Key.Home => "Home", Key.End => "End", Key.Insert => "Insert",
-                Key.Delete => "Delete", Key.PageUp => "PageUp", Key.PageDown => "PageDown",
+                Key.Escape => "Escape", Key.Enter => "Return", Key.Space => "Space", Key.Tab => "Tab",
+                Key.Back => "Backspace", Key.Delete => "Delete", Key.Insert => "Insert",
+                Key.Home => "Home", Key.End => "End", Key.PageUp => "PageUp", Key.PageDown => "PageDown",
+                Key.Left => "Left", Key.Right => "Right", Key.Up => "Up", Key.Down => "Down",
+                Key.LeftShift or Key.RightShift => "Shift",
+                Key.LeftCtrl or Key.RightCtrl => "Control",
+                Key.LeftAlt or Key.RightAlt => "Alt",
+                Key.Add => "NumpadPlus", Key.Subtract => "NumpadMinus",
+                Key.Multiply => "NumpadStar", Key.Divide => "NumpadSlash",
+                Key.OemTilde => "Backtick", Key.OemMinus => "Minus", Key.OemPlus => "Plus",
+                Key.OemComma => "Comma", Key.OemPeriod => "Period", Key.OemSemicolon => "Semicolon",
+                Key.OemQuestion => "Slash", Key.OemPipe or Key.OemBackslash => "Backslash",
+                Key.OemOpenBrackets => "LBracket", Key.OemCloseBrackets => "RBracket", Key.OemQuotes => "Quote",
+                Key.CapsLock => "CapsLock", Key.NumLock => "NumLock", Key.Scroll => "ScrollLock",
+                Key.Pause => "Pause", Key.PrintScreen => "PrintScreen",
                 _ => "",
             };
         }
@@ -271,7 +298,7 @@ namespace NutStaller.Ui
             g.FillRectangle(_listening ? Armed : Assets.Navy, new Rect(0, 0, w, h));
             g.DrawRectangle(null, _listening ? ArmedLine : Assets.LineDim, new Rect(0.5, 0.5, w - 1, h - 1));
 
-            string txt = _listening ? "PRESS A KEY..." : KeyName.ToUpperInvariant();
+            string txt = _listening ? "KEY OR CLICK..." : KeyName.ToUpperInvariant();
             Assets.DrawText(g, txt, FontSizePx, Assets.Ink, new Rect(0, 0, w, h), TextAlignment.Center, shadow: false);
             if (!_listening) BkFocusRing.Draw(g, this);
         }

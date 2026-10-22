@@ -10,9 +10,9 @@ Banjo-Kazooie: Nuts & Bolts.
 - Downloads the latest reNut release and the latest extract-xiso build
 - Extracts your Banjo-Kazooie: Nuts & Bolts (US) ISO with live progress
 - Writes `renut.cfg` so the in-game path wizard never shows up
-- Edits keybinds in `renut.toml`
+- Keyboard and mouse setup for reNut: every bind (keys and mouse buttons), mouse look, sensitivity and invert Y, saved to `renut.toml`
 - Checks for reNut updates
-- Workshop: browse community vehicle blueprints in a grid, download them into your save or remove them again, and share your own (through [nutstaller-workshop](https://github.com/etonedemid/nutstaller-workshop))
+- Workshop: browse community vehicle blueprints and reNut part mods in a grid, download them (a vehicle brings the part mods it needs) or remove them again, and share your own (through [nutstaller-workshop](https://github.com/etonedemid/nutstaller-workshop))
 - Works with mouse or a gamepad (dpad moves, A selects, LB/RB switch page, Start plays)
 - Runs on Windows and Linux (on Linux it installs the reNut AppImage; gamepad support uses SDL2 if installed)
 

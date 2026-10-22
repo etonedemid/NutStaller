@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using NutStaller.Core;
 using NutStaller.Ui;
 
@@ -41,18 +42,24 @@ namespace NutStaller
         private readonly BkLabel setupStatus = new() { Dim = true, FontSizePx = 17 };
 
         private readonly BkPagePanel pageKeybinds = new() { IsVisible = false };
-        private readonly BkKeyField bindLogField = new() { KeyName = "F2" };
+        private readonly BkValueBox mouseSpeedBox = new() { FontSizePx = 15 };
+        private readonly Dictionary<string, (BkButton Button, string Label)> _toggles = new();
+        private readonly Dictionary<string, bool> _toggleValues = new();
         private readonly BkLabel keybindsStatus = new() { Dim = true, FontSizePx = 16 };
 
         private readonly BkPagePanel pageCredits = new() { IsVisible = false };
 
-        // The workshop is its own scene over the menu: Browse, Installed, Share.
+        // The workshop is its own scene over the menu: Browse (vehicles), Parts
+        // (reNut part mods), Installed, Share.
         private readonly Canvas workshopScene = new() { IsVisible = false };
-        private readonly BkButton tabBrowse = new() { Text = "Browse", Selected = true };
+        private readonly BkButton tabBrowse = new() { Text = "Vehicles", Selected = true };
+        private readonly BkButton tabParts = new() { Text = "Parts" };
         private readonly BkButton tabInstalled = new() { Text = "Installed" };
         private readonly BkButton tabShare = new() { Text = "Share" };
         private readonly ScrollViewer browsePane = new();
         private readonly WrapPanel browseGrid = new();
+        private readonly ScrollViewer partsPane = new() { IsVisible = false };
+        private readonly WrapPanel partsGrid = new();
         private readonly ScrollViewer installedPane = new() { IsVisible = false };
         private readonly WrapPanel installedGrid = new();
         private readonly Canvas sharePane = new() { IsVisible = false };
@@ -60,6 +67,13 @@ namespace NutStaller
         private readonly BkButton workshopRefresh = new() { Text = "Refresh", FontSizePx = 18 };
         private readonly BkLabel workshopStatus = new() { Dim = true, FontSizePx = 16 };
 
+        private readonly BkButton shareModeVehicle = new() { Text = "Vehicle", Selected = true, FontSizePx = 18 };
+        private readonly BkButton shareModeMod = new() { Text = "Part mod", FontSizePx = 18 };
+        private readonly Canvas shareVehicleRow = new();
+        private readonly Canvas shareModRow = new() { IsVisible = false };
+        private readonly BkLabel shareModFile = new() { FontSizePx = 16 };
+        private readonly BkLabel shareUses = new() { FontSizePx = 14, Dim = true };
+        private readonly BkLabel shareHelp = new() { FontSizePx = 14, Dim = true };
         private readonly BkLabel shareVehicle = new() { FontSizePx = 18 };
         private readonly BkValueBox shareName = new();
         private readonly BkValueBox shareDescription = new() { FontSizePx = 15 };
@@ -81,7 +95,6 @@ namespace NutStaller
             _state = LauncherState.Load();
             installBox.Value = _state.InstallDir;
 
-            _binds["bind_renut_log_overlay"] = bindLogField;
 
             RefreshSetupStatus();
 
@@ -150,13 +163,17 @@ namespace NutStaller
             Place(p, setupStatus, 16, 284, 536, 36);
 
             p = Place(_root, pageKeybinds, 634, 279, 545, 382);
-            Label(p, "KEYBINDS", 16, 14, 300, 30, 26);
-            Label(p, "LOG OVERLAY", 16, 58, 220, 30, dim: true);
-            Place(p, bindLogField, 246, 58, 140, 30);
-            Label(p, "F4 OPENS THE IN-GAME CVAR MENU", 16, 106, 400, 24, 15, true);
-            Label(p, "MORE BINDS SHOW UP HERE ONCE THE GAME WRITES THEM", 16, 132, 520, 24, 15, true);
-            Button(p, "Save", 16, 336, 110, 32, SaveKeybindsButton_Click, 20);
-            Place(p, keybindsStatus, 136, 336, 320, 32);
+            Label(p, "KEYBINDS", 16, 8, 300, 30, 26);
+            Toggle(p, "renut_keyboard", "Keyboard", 16);
+            Toggle(p, "renut_mouse_camera", "Mouse look", 192);
+            Toggle(p, "renut_mouse_invert_y", "Invert Y", 368);
+            Label(p, "MOUSE SPEED", 16, 80, 120, 26, 14, true);
+            Place(p, mouseSpeedBox, 136, 80, 60, 26);
+            Label(p, "CLICK A KEY, THEN PRESS A KEY OR CLICK A MOUSE BUTTON", 210, 80, 330, 26, 12, true);
+            for (int i = 0; i < PadKeys.Length; i++)
+                KeyRow(PadKeys[i].Key, PadKeys[i].Label, i);
+            Button(p, "Save", 16, 344, 110, 30, SaveKeybindsButton_Click, 20);
+            Place(p, keybindsStatus, 136, 344, 320, 30);
 
             p = Place(_root, pageCredits, 634, 281, 548, 382);
             Label(p, "CREDITS", 16, 14, 300, 30, 26);
@@ -185,14 +202,18 @@ namespace NutStaller
             var p = Place(sc, new BkPagePanel { Background = new SolidColorBrush(Color.FromArgb(215, 14, 28, 80)) },
                 30, 24, 1140, 627);
             Label(p, "WORKSHOP", 22, 14, 190, 36, 30);
-            Place(p, tabBrowse, 220, 16, 150, 32).Click += (s, e) => ShowTab(tabBrowse);
-            Place(p, tabInstalled, 380, 16, 150, 32).Click += (s, e) => ShowTab(tabInstalled);
-            Place(p, tabShare, 540, 16, 150, 32).Click += (s, e) => ShowTab(tabShare);
+            var tabs = new[] { tabBrowse, tabParts, tabInstalled, tabShare };
+            for (int i = 0; i < tabs.Length; i++)
+            {
+                var tab = tabs[i];
+                Place(p, tab, 220 + i * 160, 16, 150, 32).Click += (s, e) => ShowTab(tab);
+            }
             Place(p, workshopBack, 1010, 16, 110, 32).Click += (s, e) => CloseWorkshop();
 
             browsePane.Content = browseGrid;
+            partsPane.Content = partsGrid;
             installedPane.Content = installedGrid;
-            foreach (var pane in new[] { browsePane, installedPane })
+            foreach (var pane in new[] { browsePane, partsPane, installedPane })
             {
                 pane.HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
                 Place(p, pane, 14, 62, 1114, 512);
@@ -201,35 +222,50 @@ namespace NutStaller
             Place(p, workshopStatus, 22, 584, 960, 30);
 
             var sh = Place(p, sharePane, 14, 62, 1114, 512);
-            Label(sh, "SHARE ONE OF YOUR VEHICLES", 10, 6, 600, 30, 22);
-            Label(sh, "VEHICLE", 10, 50, 120, 30, dim: true);
-            Button(sh, "<", 130, 50, 34, 30, () => PickVehicle(-1), 18);
-            Place(sh, shareVehicle, 174, 50, 300, 30);
-            Button(sh, ">", 480, 50, 34, 30, () => PickVehicle(1), 18);
+            Label(sh, "SHARE", 10, 6, 100, 30, 22);
+            Place(sh, shareModeVehicle, 110, 6, 140, 30).Click += (s, e) => ShareMode(false);
+            Place(sh, shareModeMod, 260, 6, 140, 30).Click += (s, e) => ShareMode(true);
+
+            var row = Place(sh, shareVehicleRow, 0, 50, 520, 30);
+            Label(row, "VEHICLE", 10, 0, 120, 30, dim: true);
+            Button(row, "<", 130, 0, 34, 30, () => PickVehicle(-1), 18);
+            Place(row, shareVehicle, 174, 0, 300, 30);
+            Button(row, ">", 480, 0, 34, 30, () => PickVehicle(1), 18);
+            row = Place(sh, shareModRow, 0, 50, 520, 30);
+            Label(row, "MOD FILE", 10, 0, 120, 30, dim: true);
+            Button(row, "Pick .nbpatch", 130, 0, 170, 30, () => _ = PickModFile(), 18);
+            Place(row, shareModFile, 310, 0, 210, 30);
+
             Label(sh, "NAME", 10, 92, 120, 30, dim: true);
             Place(sh, shareName, 130, 92, 384, 30);
             Label(sh, "ABOUT IT", 10, 134, 120, 30, dim: true);
             Place(sh, shareDescription, 130, 134, 384, 30);
-            Button(sh, "Pick screenshot", 10, 186, 220, 32, () => _ = PickScreenshot(), 18);
-            Label(sh, "A PICTURE OF THE VEHICLE, FROM THE GAME OR ANYWHERE", 10, 226, 504, 24, 14, true);
-            Button(sh, "Copy and open GitHub", 10, 272, 260, 34, () => _ = CopySubmission(), 20);
-            Place(sh, shareStatus, 10, 316, 504, 60);
-            Label(sh, "NUTSTALLER COPIES YOUR VEHICLE AND PICTURE. PASTE IT INTO THE GITHUB FORM, " +
-                "TICK THE BOX AND SUBMIT. A BOT PUBLISHES IT WITHIN A MINUTE (3 PER 10 MINUTES).",
-                10, 400, 504, 80, 14, true);
+            Place(sh, shareUses, 10, 168, 504, 40);
+            Button(sh, "Pick screenshot", 10, 212, 220, 32, () => _ = PickScreenshot(), 18);
+            Label(sh, "A PICTURE OF IT, FROM THE GAME OR ANYWHERE", 10, 250, 504, 24, 14, true);
+            Button(sh, "Copy and open GitHub", 10, 286, 260, 34, () => _ = CopySubmission(), 20);
+            Place(sh, shareStatus, 10, 328, 504, 66);
+            Place(sh, shareHelp, 10, 400, 504, 100);
             Place(sh, sharePreview, 540, 50, 560, 315);
+            ShareMode(false);
         }
 
         // ------------------------------------------------------------- workshop
 
         private List<Workshop.Entry>? _entries;
+        private List<Workshop.ModEntry> _mods = new();
         private List<Workshop.Installed> _installed = new();
+        private List<Workshop.InstalledMod> _installedMods = new();
+        private List<Workshop.LocalMod> _localMods = new();
         private readonly Dictionary<string, Avalonia.Media.Imaging.Bitmap> _previews = new();
         private List<Workshop.LocalVehicle> _vehicles = new();
         private int _vehicleIndex;
         private string? _screenshot;
+        private string? _modFile;
+        private bool _shareMod;
 
         private string SaveDir => Workshop.SaveDir(_state);
+        private string ModsDir => Workshop.ModsDir(_state);
 
         private void NavWorkshop_Click()
         {
@@ -247,11 +283,12 @@ namespace NutStaller
 
         private void ShowTab(BkButton tab)
         {
-            foreach (var t in new[] { tabBrowse, tabInstalled, tabShare }) t.Selected = t == tab;
+            foreach (var t in new[] { tabBrowse, tabParts, tabInstalled, tabShare }) t.Selected = t == tab;
             browsePane.IsVisible = tab == tabBrowse;
+            partsPane.IsVisible = tab == tabParts;
             installedPane.IsVisible = tab == tabInstalled;
             sharePane.IsVisible = tab == tabShare;
-            workshopRefresh.IsVisible = tab == tabBrowse;
+            workshopRefresh.IsVisible = tab == tabBrowse || tab == tabParts;
             if (tab == tabShare) OpenShare();
             else RebuildGrids();
         }
@@ -259,7 +296,7 @@ namespace NutStaller
         private async Task RefreshWorkshop()
         {
             workshopStatus.SetText("LOADING THE WORKSHOP...");
-            try { _entries = await Workshop.FetchIndexAsync(); }
+            try { (_entries, _mods) = await Workshop.FetchIndexAsync(); }
             catch (Exception ex)
             {
                 workshopStatus.SetText("COULD NOT REACH THE WORKSHOP: " + ex.Message.Split('\n')[0].ToUpperInvariant());
@@ -268,26 +305,62 @@ namespace NutStaller
             RebuildGrids();
         }
 
+        // What a vehicle needs: the names of the workshop mods it uses, then
+        // parts from mods the workshop does not have.
+        private string Needs(Workshop.Entry e) => string.Join(", ",
+            e.Requires.Select(r => _mods.FirstOrDefault(m => m.Id == r)?.Name ?? "mod #" + r).Concat(e.Missing));
+
+        private bool ModPresent(string modId) =>
+            _installedMods.Any(m => m.ModId == modId) || _localMods.Any(m => m.ModId == modId);
+
         private void RebuildGrids()
         {
             _installed = Workshop.LoadInstalled(SaveDir);
+            _installedMods = Workshop.LoadInstalledMods(SaveDir);
+            _localMods = Workshop.LocalMods(ModsDir);
             browseGrid.Children.Clear();
             foreach (var e in _entries ?? new())
-                browseGrid.Children.Add(Tile(e.Name, e.Author, e.Description, e.Parts, e.PreviewPath, e.Id, e));
+            {
+                bool have = _installed.Any(i => i.Id == e.Id);
+                browseGrid.Children.Add(Tile(e.Name, e.Author, e.Description, $"{e.Parts} PARTS", Needs(e), e.PreviewPath,
+                    have ? "Remove" : "Download", have ? () => RemoveBlueprint(e.Id, e.Name) : () => _ = InstallBlueprint(e)));
+            }
+            partsGrid.Children.Clear();
+            foreach (var m in _mods)
+            {
+                bool ours = _installedMods.Any(i => i.ModId == m.ModId);
+                string info = $"{m.PartNames.Count} PARTS - V{m.Version} - {Math.Max(1, m.Size / 1024)} KB";
+                partsGrid.Children.Add(ours
+                    ? Tile(m.Name, m.Author, m.Description, info, "PARTS: " + string.Join(", ", m.PartNames), m.PreviewPath,
+                        "Remove", () => RemoveMod(m.ModId, m.Name))
+                    : ModPresent(m.ModId)
+                        ? Tile(m.Name, m.Author, m.Description, "IN YOUR MODS FOLDER", "PARTS: " + string.Join(", ", m.PartNames),
+                            m.PreviewPath, null, null)
+                        : Tile(m.Name, m.Author, m.Description, info, "PARTS: " + string.Join(", ", m.PartNames), m.PreviewPath,
+                            "Download", () => _ = InstallMod(m)));
+            }
             installedGrid.Children.Clear();
             foreach (var i in _installed)
-                installedGrid.Children.Add(Tile(i.Name, i.Author, i.Description, i.Parts, i.PreviewPath, i.Id, null));
+                installedGrid.Children.Add(Tile(i.Name, i.Author, i.Description, $"{i.Parts} PARTS", "", i.PreviewPath,
+                    "Remove", () => RemoveBlueprint(i.Id, i.Name)));
+            foreach (var m in _installedMods)
+                installedGrid.Children.Add(Tile(m.Name, m.Author, m.Description, $"PART MOD - {m.Parts} PARTS", "",
+                    m.PreviewPath, "Remove", () => RemoveMod(m.ModId, m.Name)));
             if (installedPane.IsVisible)
-                workshopStatus.SetText(_installed.Count == 0 ? "NOTHING INSTALLED FROM THE WORKSHOP YET"
-                    : $"{_installed.Count} INSTALLED - THEY ARE IN THE GAME'S GARAGE WITH YOUR OWN VEHICLES");
+                workshopStatus.SetText(_installed.Count + _installedMods.Count == 0 ? "NOTHING INSTALLED FROM THE WORKSHOP YET"
+                    : $"{_installed.Count} VEHICLES, {_installedMods.Count} PART MODS INSTALLED");
+            else if (partsPane.IsVisible && _entries != null)
+                workshopStatus.SetText(_mods.Count == 0 ? "NO PART MODS YET - SHARE THE FIRST ONE!"
+                    : $"{_mods.Count} PART MODS - THEY LOAD WHEN RENUT STARTS ({ModsDir})");
             else if (_entries != null)
                 workshopStatus.SetText(_entries.Count == 0 ? "NOTHING HERE YET - SHARE THE FIRST ONE!"
                     : $"{_entries.Count} BLUEPRINTS - {_installed.Count} INSTALLED");
         }
 
-        // One card of the grid: picture, name, author, about, Download or Remove.
-        private Control Tile(string name, string author, string description, int parts, string preview,
-            string id, Workshop.Entry? entry)
+        // One card of a grid: picture, name, author, about, a line of info, what
+        // it needs (or has), and its button.
+        private Control Tile(string name, string author, string description, string info, string needs, string preview,
+            string? button, Action? onClick)
         {
             var tile = new Canvas
             {
@@ -297,13 +370,13 @@ namespace NutStaller
             var image = Place(tile, new Image { Stretch = Stretch.UniformToFill }, 4, 4, 258, 145);
             Place(tile, new BkLabel { Text = name, FontSizePx = 19 }, 6, 152, 254, 24);
             Place(tile, new BkLabel { Text = $"BY {author}".ToUpperInvariant(), FontSizePx = 13, Dim = true }, 6, 176, 254, 18);
-            Place(tile, new BkLabel { Text = description, FontSizePx = 13, Dim = true }, 6, 194, 254, 32);
-            Place(tile, new BkLabel { Text = $"{parts} PARTS", FontSizePx = 13, Dim = true }, 6, 232, 120, 24);
-            bool installed = _installed.Any(i => i.Id == id);
-            if (installed)
-                Button(tile, "Remove", 136, 228, 124, 30, () => RemoveBlueprint(id, name), 18);
-            else if (entry != null)
-                Button(tile, "Download", 136, 228, 124, 30, () => _ = InstallBlueprint(entry), 18);
+            Place(tile, new BkLabel { Text = description, FontSizePx = 13, Dim = true }, 6, 194, 254, needs.Length > 0 ? 18 : 32);
+            if (needs.Length > 0)
+                Place(tile, new BkLabel { Text = needs.StartsWith("PARTS: ") ? needs : "NEEDS: " + needs, FontSizePx = 12 },
+                    6, 211, 254, 17);
+            Place(tile, new BkLabel { Text = info, FontSizePx = 13, Dim = true }, 6, 232, button == null ? 254 : 128, 24);
+            if (button != null && onClick != null)
+                Button(tile, button, 136, 228, 124, 30, onClick, 18);
             _ = LoadPreview(image, preview);
             return tile;
         }
@@ -322,14 +395,26 @@ namespace NutStaller
             catch { } // no picture is fine
         }
 
+        // The vehicle, and first every workshop mod it needs that is not there yet.
         private async Task InstallBlueprint(Workshop.Entry e)
         {
             try
             {
+                int mods = 0;
+                foreach (var m in e.Requires.Select(r => _mods.FirstOrDefault(m => m.Id == r)).OfType<Workshop.ModEntry>())
+                {
+                    if (ModPresent(m.ModId)) continue;
+                    workshopStatus.SetText($"DOWNLOADING THE PART MOD {m.Name.ToUpperInvariant()}...");
+                    await Workshop.InstallModAsync(SaveDir, ModsDir, m);
+                    _installedMods = Workshop.LoadInstalledMods(SaveDir);
+                    mods++;
+                }
                 workshopStatus.SetText($"DOWNLOADING {e.Name.ToUpperInvariant()}...");
                 var item = Workshop.InstallEntry(SaveDir, e, await Workshop.DownloadAsync(e.BlueprintPath));
                 RebuildGrids();
-                workshopStatus.SetText($"INSTALLED {e.Name.ToUpperInvariant()} ({item.ContentId}) - LOAD IT IN THE GARAGE");
+                workshopStatus.SetText($"INSTALLED {e.Name.ToUpperInvariant()}" + (mods > 0 ? $" AND {mods} PART MOD(S)" : "") +
+                    (e.Missing.Count > 0 ? " - IT ALSO USES PARTS NOT IN THE WORKSHOP: " + string.Join(", ", e.Missing).ToUpperInvariant()
+                                         : " - LOAD IT IN THE GARAGE"));
             }
             catch (Exception ex) { workshopStatus.SetText("DOWNLOAD FAILED: " + ex.Message.ToUpperInvariant()); }
         }
@@ -345,6 +430,29 @@ namespace NutStaller
             catch (Exception ex) { workshopStatus.SetText("REMOVE FAILED: " + ex.Message.ToUpperInvariant()); }
         }
 
+        private async Task InstallMod(Workshop.ModEntry m)
+        {
+            try
+            {
+                workshopStatus.SetText($"DOWNLOADING {m.Name.ToUpperInvariant()}...");
+                await Workshop.InstallModAsync(SaveDir, ModsDir, m);
+                RebuildGrids();
+                workshopStatus.SetText($"INSTALLED {m.Name.ToUpperInvariant()} - ITS PARTS ARE IN THE GARAGE NEXT TIME RENUT STARTS");
+            }
+            catch (Exception ex) { workshopStatus.SetText("DOWNLOAD FAILED: " + ex.Message.ToUpperInvariant()); }
+        }
+
+        private void RemoveMod(string modId, string name)
+        {
+            try
+            {
+                Workshop.RemoveMod(SaveDir, modId);
+                RebuildGrids();
+                workshopStatus.SetText($"REMOVED {name.ToUpperInvariant()} - VEHICLES USING ITS PARTS GET THEIR BASE PARTS");
+            }
+            catch (Exception ex) { workshopStatus.SetText("REMOVE FAILED: " + ex.Message.ToUpperInvariant()); }
+        }
+
         // Your own builds only: the workshop's are someone else's to share.
         private void OpenShare()
         {
@@ -352,24 +460,73 @@ namespace NutStaller
                 .Select(i => Path.GetFullPath(Path.Combine(SaveDir, "00000001", i.ContentId, i.ContentId[2..]))).ToHashSet();
             _vehicles = Workshop.LocalVehicles(SaveDir).Where(v => !fromWorkshop.Contains(Path.GetFullPath(v.File))).ToList();
             _vehicleIndex = Math.Min(_vehicleIndex, Math.Max(0, _vehicles.Count - 1));
-            PickVehicle(0);
             workshopStatus.SetText("");
-            shareStatus.SetText(_vehicles.Count == 0 ? "NO VEHICLES IN YOUR SAVE YET - BUILD ONE IN THE GAME FIRST" : "");
+            ShareMode(_shareMod);
+        }
+
+        private void ShareMode(bool mod)
+        {
+            _shareMod = mod;
+            shareModeVehicle.Selected = !mod;
+            shareModeMod.Selected = mod;
+            shareVehicleRow.IsVisible = !mod;
+            shareModRow.IsVisible = mod;
+            shareStatus.SetText("");
+            if (mod)
+            {
+                shareUses.SetText("");
+                if (_modFile != null && !File.Exists(_modFile)) { _modFile = null; shareModFile.SetText(""); }
+                shareName.Value = _modFile != null ? Workshop.ReadMod(_modFile).Name : "";
+                shareHelp.SetText("A RENUT PART MOD (.NBPATCH). NUTSTALLER COPIES THE DETAILS AND PUTS THE MOD IN A FOLDER " +
+                    "AS A .ZIP: PASTE INTO THE FORM AND DRAG THE ZIP INTO 'MOD FILE'. ONLY PART MODS ARE HOSTED, " +
+                    "AND A MAINTAINER APPROVES EACH ONE.");
+            }
+            else
+            {
+                PickVehicle(0);
+                if (_vehicles.Count == 0) shareStatus.SetText("NO VEHICLES IN YOUR SAVE YET - BUILD ONE IN THE GAME FIRST");
+                shareHelp.SetText("NUTSTALLER COPIES YOUR VEHICLE AND PICTURE. PASTE IT INTO THE GITHUB FORM, " +
+                    "TICK THE BOX AND SUBMIT. A BOT PUBLISHES IT WITHIN A MINUTE (3 PER 10 MINUTES).");
+            }
         }
 
         private void PickVehicle(int delta)
         {
-            if (_vehicles.Count == 0) { shareVehicle.SetText("NONE"); return; }
+            if (_vehicles.Count == 0) { shareVehicle.SetText("NONE"); shareUses.SetText(""); return; }
             _vehicleIndex = (_vehicleIndex + delta + _vehicles.Count) % _vehicles.Count;
             shareVehicle.SetText(_vehicles[_vehicleIndex].Name);
             shareName.Value = _vehicles[_vehicleIndex].Name;
+            var custom = Workshop.CustomPartsIn(File.ReadAllBytes(_vehicles[_vehicleIndex].File), ModsDir);
+            shareUses.SetText(custom.Count == 0 ? "" : "USES CUSTOM PARTS: " +
+                string.Join(", ", custom.Select(c => $"{c.Id} ({c.Mod})")).ToUpperInvariant());
+        }
+
+        private async Task PickModFile()
+        {
+            var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Pick a reNut part mod",
+                FileTypeFilter = new[] { new FilePickerFileType("reNut mod") { Patterns = new[] { "*.nbpatch" } } },
+                SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(ModsDir),
+            });
+            string? path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+            if (path == null) return;
+            try
+            {
+                var mod = Workshop.ReadMod(path);
+                _modFile = path;
+                shareModFile.SetText($"{Path.GetFileName(path)} - {mod.PartIds.Count} PARTS");
+                shareName.Value = mod.Name;
+                shareStatus.SetText(mod.PartIds.Count == 0 ? "THAT MOD HAS NO PARTS; THE WORKSHOP HOSTS PART MODS" : "");
+            }
+            catch (Exception ex) { shareStatus.SetText("ERROR: " + ex.Message.ToUpperInvariant()); }
         }
 
         private async Task PickScreenshot()
         {
             var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                Title = "Pick a picture of the vehicle",
+                Title = "Pick a picture",
                 FileTypeFilter = new[] { FilePickerFileTypes.ImageAll },
             });
             string? path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
@@ -384,16 +541,33 @@ namespace NutStaller
 
         private async Task CopySubmission()
         {
-            if (_vehicles.Count == 0) { shareStatus.SetText("NO VEHICLE TO SHARE"); return; }
+            if (_shareMod ? _modFile == null : _vehicles.Count == 0)
+            {
+                shareStatus.SetText(_shareMod ? "PICK THE .NBPATCH FIRST" : "NO VEHICLE TO SHARE");
+                return;
+            }
             if (shareName.Value.Trim().Length == 0) { shareStatus.SetText("GIVE IT A NAME"); return; }
             if (_screenshot == null) { shareStatus.SetText("PICK A SCREENSHOT FIRST"); return; }
             try
             {
-                string json = Workshop.BuildSubmission(File.ReadAllBytes(_vehicles[_vehicleIndex].File),
-                    shareName.Value, shareDescription.Value, _screenshot);
-                await Clipboard!.SetTextAsync(json);
-                OpenUrl(Workshop.SubmitUrl);
-                shareStatus.SetText("COPIED - PASTE IT INTO THE GITHUB FORM, TICK THE BOX, SUBMIT");
+                if (_shareMod)
+                {
+                    var (json, zip) = Workshop.BuildModSubmission(_modFile!, shareName.Value, shareDescription.Value, _screenshot);
+                    await Clipboard!.SetTextAsync(json);
+                    OpenUrl(Workshop.SubmitModUrl);
+                    OpenUrl(Path.GetDirectoryName(zip)!);
+                    shareStatus.SetText($"COPIED - PASTE IT INTO THE FORM, DRAG {Path.GetFileName(zip).ToUpperInvariant()} " +
+                        "FROM THE FOLDER THAT OPENED INTO 'MOD FILE', TICK THE BOX, SUBMIT");
+                }
+                else
+                {
+                    byte[] data = File.ReadAllBytes(_vehicles[_vehicleIndex].File);
+                    string json = Workshop.BuildSubmission(data, shareName.Value, shareDescription.Value, _screenshot,
+                        Workshop.CustomPartsIn(data, ModsDir));
+                    await Clipboard!.SetTextAsync(json);
+                    OpenUrl(Workshop.SubmitUrl);
+                    shareStatus.SetText("COPIED - PASTE IT INTO THE GITHUB FORM, TICK THE BOX, SUBMIT");
+                }
             }
             catch (Exception ex) { shareStatus.SetText("ERROR: " + ex.Message.ToUpperInvariant()); }
         }
@@ -476,14 +650,14 @@ namespace NutStaller
 
         private IEnumerable<Control> WorkshopPadCandidates()
         {
-            foreach (var c in new Control[] { tabBrowse, tabInstalled, tabShare })
+            foreach (var c in new Control[] { tabBrowse, tabParts, tabInstalled, tabShare })
                 yield return c;
             yield return workshopBack;
             if (workshopRefresh.IsVisible) yield return workshopRefresh;
             if (sharePane.IsVisible)
-                foreach (var c in sharePane.Children)
-                    if (c is BkButton or BkValueBox) yield return c;
-            var grid = browsePane.IsVisible ? browseGrid : installedPane.IsVisible ? installedGrid : null;
+                foreach (var c in sharePane.GetVisualDescendants().OfType<Control>())
+                    if (c is BkButton or BkValueBox && c.IsEffectivelyVisible) yield return c;
+            var grid = browsePane.IsVisible ? browseGrid : partsPane.IsVisible ? partsGrid : installedPane.IsVisible ? installedGrid : null;
             if (grid != null)
                 foreach (var tile in grid.Children.OfType<Canvas>())
                     foreach (var b in tile.Children.OfType<BkButton>())
@@ -518,7 +692,7 @@ namespace NutStaller
         {
             if (workshopScene.IsVisible)
             {
-                var tabs = new[] { tabBrowse, tabInstalled, tabShare };
+                var tabs = new[] { tabBrowse, tabParts, tabInstalled, tabShare };
                 var tab = tabs[(Array.FindIndex(tabs, t => t.Selected) + delta + tabs.Length) % tabs.Length];
                 ShowTab(tab);
                 tab.Focus();
@@ -986,29 +1160,60 @@ namespace NutStaller
 
         // ------------------------------------------------------------- keybinds
 
+        // reNut's keyboard binds (game/keyboard_input.cpp) and their defaults.
+        private static readonly (string Key, string Label, string Default)[] PadKeys =
+        {
+            ("renut_key_forward", "FORWARD", "W"), ("renut_key_back", "BACK", "S"),
+            ("renut_key_left", "LEFT", "A"), ("renut_key_right", "RIGHT", "D"),
+            ("renut_key_walk", "WALK", "Control"), ("renut_key_a", "A / JUMP", "Space"),
+            ("renut_key_b", "B", "RMB"), ("renut_key_x", "X", "LMB"),
+            ("renut_key_y", "Y", "E"), ("renut_key_lb", "LB", "Q"),
+            ("renut_key_rb", "RB", "R"), ("renut_key_lt", "LT", "Shift"),
+            ("renut_key_rt", "RT", "F"), ("renut_key_start", "START", "Escape"),
+            ("renut_key_back_button", "BACK BTN", "Tab"), ("renut_key_ls", "L STICK", "C"),
+            ("renut_key_rs", "R STICK", "V"), ("renut_key_dpad_up", "DPAD UP", "Up"),
+            ("renut_key_dpad_down", "DPAD DOWN", "Down"), ("renut_key_dpad_left", "DPAD LEFT", "Left"),
+            ("renut_key_dpad_right", "DPAD RIGHT", "Right"),
+        };
+
+        // Three columns of eight rows under the toggles.
+        private void KeyRow(string key, string label, int slot)
+        {
+            if (slot >= 24) return;  // ponytail: room for 24 binds; a scroll list if reNut ever has more
+            double x = 16 + slot / 8 * 176, y = 116 + slot % 8 * 28;
+            Place(pageKeybinds, new BkLabel { Text = label, FontSizePx = 13, Dim = true }, x, y, 92, 24);
+            _binds[key] = Place(pageKeybinds, new BkKeyField { FontSizePx = 14 }, x + 92, y, 78, 24);
+        }
+
+        private void Toggle(Panel parent, string key, string label, double x)
+        {
+            var b = Place(parent, new BkButton { FontSizePx = 16 }, x, 44, 166, 28);
+            b.Click += (s, e) => { _toggleValues[key] = !_toggleValues[key]; ShowToggle(key); };
+            _toggles[key] = (b, label);
+        }
+
+        private void ShowToggle(string key) =>
+            _toggles[key].Button.Text = $"{_toggles[key].Label}: {(_toggleValues[key] ? "On" : "Off")}";
+
         private void LoadKeybindsIntoUi()
         {
             var toml = new TomlConfig(_state.RenutToml);
-
-            // pick up any bind_* keys the game has persisted that we don't know about;
-            // extra rows go below the notes so nothing overlaps
-            int extra = _binds.Count - 1;
+            foreach (var key in _toggles.Keys)
+            {
+                _toggleValues[key] = toml.GetBool(key, false);
+                ShowToggle(key);
+            }
+            mouseSpeedBox.Value = toml.GetNumber("renut_mouse_sensitivity", 1.0)
+                .ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            foreach (var (key, _, def) in PadKeys)
+                _binds[key].KeyName = toml.Has(key) ? toml.GetString(key) : def;
+            // reNut's own hotkeys (bind_*: log overlay, settings...) after the pad keys
             foreach (var key in toml.Keys.Where(k => k.StartsWith("bind_", StringComparison.OrdinalIgnoreCase)).ToList())
             {
-                if (_binds.ContainsKey(key)) continue;
-                int y = 170 + extra * 40;
-                extra++;
-
-                string label = key.Replace("bind_", "").Replace('_', ' ').ToUpperInvariant();
-                var lbl = new BkLabel { Text = label, Dim = true, FontSizePx = 18 };
-                var field = new BkKeyField { KeyName = toml.GetString(key) };
-                Place(pageKeybinds, lbl, 16, y, 220, 30);
-                Place(pageKeybinds, field, 246, y, 140, 30);
-                _binds[key] = field;
+                if (!_binds.ContainsKey(key))
+                    KeyRow(key, key[5..].Replace("renut_", "").Replace('_', ' ').ToUpperInvariant(), _binds.Count);
+                if (_binds.TryGetValue(key, out var field)) field.KeyName = toml.GetString(key);
             }
-
-            foreach (var (key, field) in _binds)
-                if (toml.Has(key)) field.KeyName = toml.GetString(key);
         }
 
         private void SaveKeybindsButton_Click()
@@ -1019,9 +1224,14 @@ namespace NutStaller
                 foreach (var (key, field) in _binds)
                     if (field.KeyName.Trim().Length > 0)
                         toml.SetString(key, field.KeyName.Trim());
+                foreach (var (key, on) in _toggleValues)
+                    toml.SetBool(key, on);
+                if (double.TryParse(mouseSpeedBox.Value, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out double speed))
+                    toml.SetNumber("renut_mouse_sensitivity", Math.Clamp(speed, 0.05, 10));
                 Directory.CreateDirectory(Path.GetDirectoryName(_state.RenutToml)!);
                 toml.Save();
-                keybindsStatus.SetText("SAVED");
+                keybindsStatus.SetText("SAVED - RESTART RENUT IF IT IS RUNNING");
             }
             catch (Exception ex)
             {
