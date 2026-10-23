@@ -17,6 +17,8 @@ namespace NutStaller.Core
         public string RenutToml => Path.Combine(ConfigDir, "renut.toml");
         public string RenutCfg => Path.Combine(ConfigDir, "renut.cfg");
         public string GameDataDir => Path.Combine(InstallDir, "game");
+        // the title update's files (TitleUpdate.cs); its default.xexp also sits in game/
+        public string UpdateDataDir => Path.Combine(GameDataDir, "update");
         // Documents on Windows, $XDG_DATA_HOME (~/.local/share) elsewhere. DoNotVerify:
         // by default .NET answers "" for a folder that does not exist yet (a fresh
         // home has no ~/.local/share), which would put renut/ in the working dir
@@ -30,6 +32,7 @@ namespace NutStaller.Core
         public bool XisoInstalled => File.Exists(XisoExe);
         public bool GameExtracted => Directory.Exists(GameDataDir) &&
                                      Directory.EnumerateFileSystemEntries(GameDataDir).Any();
+        public bool UpdateInstalled => File.Exists(Path.Combine(UpdateDataDir, "default.xexp"));
 
         // Where the launcher keeps its own files: beside the exe, or beside the
         // .AppImage when run as one (its mount is read-only)
@@ -77,7 +80,7 @@ namespace NutStaller.Core
             sb.Append("# renut path configuration\n");
             sb.Append($"game_data_root   = \"{GameDataDir}\"\n");
             sb.Append($"user_data_root   = \"{UserDataDir}\"\n");
-            sb.Append("update_data_root = \"\"\n");
+            sb.Append($"update_data_root = \"{(UpdateInstalled ? UpdateDataDir : "")}\"\n");
             File.WriteAllText(RenutCfg, sb.ToString());
         }
     }

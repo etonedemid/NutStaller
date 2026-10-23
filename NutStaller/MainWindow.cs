@@ -164,6 +164,7 @@ namespace NutStaller
                 await DoDownloadXiso();
                 await DoPickIsoAndExtract();
             }));
+            Button(p, "4. Add title update", 268, 178, 274, 34, () => _ = RunBusy(DoAddTitleUpdate), 20);
             Place(p, renutStatus, 268, 58, 284, 32);
             Place(p, xisoStatus, 268, 98, 284, 32);
             Place(p, gameStatus, 268, 138, 284, 32);
@@ -954,7 +955,8 @@ namespace NutStaller
                 ? $"INSTALLED {(_state.RenutVersion.Length > 0 ? "(" + _state.RenutVersion.ToUpperInvariant() + ")" : "")}"
                 : "NOT INSTALLED");
             xisoStatus.SetText(_state.XisoInstalled ? "READY" : "NOT INSTALLED");
-            gameStatus.SetText(_state.GameExtracted ? "GAME DATA FOUND" : "NO GAME DATA YET");
+            gameStatus.SetText(!_state.GameExtracted ? "NO GAME DATA YET"
+                : _state.UpdateInstalled ? "GAME DATA + TITLE UPDATE" : "GAME DATA FOUND");
         }
 
         private async Task RunBusy(Func<Task> work)
@@ -1176,6 +1178,26 @@ namespace NutStaller
             _state.WriteRenutCfg();
             _state.Save();
             SetStatus("Game data extracted and paths written. You are good to go!");
+        }
+
+        // The title update (a LIVE package, or a zip with one): its files into
+        // game/update, default.xexp next to default.xex, update_data_root set.
+        private async Task DoAddTitleUpdate()
+        {
+            _state.InstallDir = installBox.Value.Trim();
+            if (!_state.GameExtracted)
+                throw new InvalidOperationException("extract the game first (step 3).");
+            var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Pick the title update (the TU_... file, or a zip with it)",
+            });
+            string? path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+            if (path == null) return;
+
+            SetStatus("Unpacking the title update...");
+            string name = await Task.Run(() => TitleUpdate.Install(path, _state.GameDataDir, _state.UpdateDataDir));
+            _state.WriteRenutCfg();
+            SetStatus($"{name} installed.");
         }
 
         // Every disc layout puts the volume descriptor one sector into its data
