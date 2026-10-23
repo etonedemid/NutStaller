@@ -163,6 +163,7 @@ namespace NutStaller
                 await DoDownloadRenut();
                 await DoDownloadXiso();
                 await DoPickIsoAndExtract();
+                if (_state.GameExtracted) await DoAddTitleUpdate();
             }));
             Button(p, "4. Add title update", 268, 178, 274, 34, () => _ = RunBusy(DoAddTitleUpdate), 20);
             Place(p, renutStatus, 268, 58, 284, 32);
@@ -1189,10 +1190,14 @@ namespace NutStaller
                 throw new InvalidOperationException("extract the game first (step 3).");
             var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                Title = "Pick the title update (the TU_... file, or a zip with it)",
+                Title = "Pick the title update (the TU_... file, or a zip with it; cancel to skip)",
             });
             string? path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
-            if (path == null) return;
+            if (path == null)
+            {
+                SetStatus(_state.UpdateInstalled ? "Title update unchanged." : "No title update added; you can add it later (step 4).");
+                return;
+            }
 
             SetStatus("Unpacking the title update...");
             string name = await Task.Run(() => TitleUpdate.Install(path, _state.GameDataDir, _state.UpdateDataDir));
