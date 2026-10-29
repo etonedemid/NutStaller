@@ -165,7 +165,7 @@ namespace NutStaller
                 await DoPickIsoAndExtract();
                 if (_state.GameExtracted) await DoAddTitleUpdate();
             }));
-            Button(p, "4. Add title update", 268, 178, 274, 34, () => _ = RunBusy(DoAddTitleUpdate), 20);
+            Button(p, "4. Title update (needed)", 268, 178, 274, 34, () => _ = RunBusy(DoAddTitleUpdate), 20);
             Place(p, renutStatus, 268, 58, 284, 32);
             Place(p, xisoStatus, 268, 98, 284, 32);
             Place(p, gameStatus, 268, 138, 284, 32);
@@ -957,7 +957,7 @@ namespace NutStaller
                 : "NOT INSTALLED");
             xisoStatus.SetText(_state.XisoInstalled ? "READY" : "NOT INSTALLED");
             gameStatus.SetText(!_state.GameExtracted ? "NO GAME DATA YET"
-                : _state.UpdateInstalled ? "GAME DATA + TITLE UPDATE" : "GAME DATA FOUND");
+                : _state.UpdateInstalled ? "GAME DATA + TITLE UPDATE" : "TITLE UPDATE NEEDED (STEP 4)");
         }
 
         private async Task RunBusy(Func<Task> work)
@@ -1190,12 +1190,12 @@ namespace NutStaller
                 throw new InvalidOperationException("extract the game first (step 3).");
             var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                Title = "Pick the title update (the TU_... file, or a zip with it; cancel to skip)",
+                Title = "Pick the title update (the TU_... file, or a zip with it)",
             });
             string? path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
             if (path == null)
             {
-                SetStatus(_state.UpdateInstalled ? "Title update unchanged." : "No title update added; you can add it later (step 4).");
+                SetStatus(_state.UpdateInstalled ? "Title update unchanged." : "reNut needs the title update: add it with step 4.");
                 return;
             }
 
@@ -1332,6 +1332,16 @@ namespace NutStaller
             {
                 ShowPage(pageSetup, navSetup);
                 SetStatus("reNut is not installed yet. Run setup first.");
+                return;
+            }
+            if (!_state.UpdateInstalled)
+            {
+                ShowPage(pageSetup, navSetup);
+                SetStatus("reNut needs the title update: add it with step 4.");
+                _ = MessageDialog.ShowClip(this,
+                    "reNut needs the game's title update (Title Update #3). Add it on the Set Up Game page, step 4: " +
+                    "pick the TU_... file, or a zip with it.",
+                    "Title update needed", "titleupdate.zip", 12.5);
                 return;
             }
             try

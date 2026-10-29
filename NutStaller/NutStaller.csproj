@@ -14,6 +14,7 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets\ANDYB.TTF" />
     <AvaloniaResource Include="Assets\bg.png" />
+    <AvaloniaResource Include="Assets\titleupdate.zip" />
   </ItemGroup>
 
   <ItemGroup>
